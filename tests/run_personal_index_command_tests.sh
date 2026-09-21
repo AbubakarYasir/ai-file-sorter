@@ -78,6 +78,22 @@ int main(int argc, char** argv) {
     }
 
     {
+        const auto parsed = parse_args({
+            "aifilesorter-bin", "--allow-direct-launch", "index", "/tmp/root-a",
+            "--json", "--console-log"});
+        if (!parsed.requested || !parsed.error.empty() || parsed.options.roots.size() != 1 ||
+            !parsed.options.json_output) {
+            fail("Packaged launcher argv shape was not accepted");
+        }
+        if (parsed.consumed_arguments.size() < 6 ||
+            parsed.consumed_arguments[1] ||
+            !parsed.consumed_arguments[2] ||
+            parsed.consumed_arguments[5]) {
+            fail("Global launcher flags should remain available to the main parser");
+        }
+    }
+
+    {
         const auto parsed = parse_args({"aifilesorter", "index", "--hash", "smart", "/tmp/root"});
         if (!parsed.requested || parsed.error.empty()) {
             fail("Unsupported hash mode should be rejected until implemented");
