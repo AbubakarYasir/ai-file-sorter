@@ -147,9 +147,9 @@ app/include/llama/*.h
 /Testing/
 changelog/
 /models/
-/rd/
-/prototypes/
-/store/ms-store/
+rd/
+prototypes/
+store/ms-store/
 /.github/workflows/ms-store-listing.yml
 /docs/**
 !/docs/
@@ -159,7 +159,7 @@ changelog/
 !/docs/testing.md
 !/docs/categorization-behavior.md
 !/docs/updater-contract.md
-!/docs/PERSONAL-ORGANIZER-ROADMAP.md
+!/docs/PERSONAL-ORGANIZER-*.md
 
 # Build artifacts
 
