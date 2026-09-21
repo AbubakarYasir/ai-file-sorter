@@ -196,8 +196,8 @@ int main() {
         fail("Explicitly excluded directory was traversed");
     }
 
-    // A subsequent successful scan should mark a deleted file as no longer
-    // present without deleting its historical index row.
+    // A subsequent complete scan should mark a genuinely deleted file as no
+    // longer present without deleting its historical index row.
     fs::remove(root / "ordinary" / "notes.md");
     PersonalFileIndexOptions second_options = options;
     second_options.compute_sha256 = false;
@@ -214,14 +214,44 @@ int main() {
             quote_sql(deleted_path) + ";");
     if (deleted_present != 0) {
         sqlite3_close(db);
-        fail("Deleted file was not marked stale on the next scan");
+        fail("Deleted file was not marked stale on the next complete scan");
+    }
+
+    // If the entire root becomes unavailable, the index must not reinterpret
+    // that failed observation as evidence that every file was deleted.
+    fs::remove_all(root);
+    const auto third = index.scan({root.string()}, second_options);
+    if (!third.completed) {
+        sqlite3_close(db);
+        fail("Missing-root scan should finish as a non-fatal partial run");
+    }
+    if (third.errors == 0) {
+        sqlite3_close(db);
+        fail("Missing-root scan should report an access/root error");
+    }
+
+    const auto document_still_present = scalar_int64(
+        db,
+        "SELECT is_present FROM personal_index_entries WHERE full_path=" +
+            quote_sql(doc_path) + ";");
+    if (document_still_present != 1) {
+        sqlite3_close(db);
+        fail("Unavailable root incorrectly marked previously present files as missing");
+    }
+
+    const std::string latest_status = scalar_text(
+        db,
+        "SELECT status FROM personal_index_scan_runs ORDER BY id DESC LIMIT 1;");
+    if (latest_status != "partial") {
+        sqlite3_close(db);
+        fail("Unavailable root should persist a partial scan status, got: " + latest_status);
     }
 
     const auto run_count = scalar_int64(
         db, "SELECT COUNT(*) FROM personal_index_scan_runs;");
-    if (run_count != 2) {
+    if (run_count != 3) {
         sqlite3_close(db);
-        fail("Expected exactly two persisted scan runs");
+        fail("Expected exactly three persisted scan runs");
     }
 
     sqlite3_close(db);
