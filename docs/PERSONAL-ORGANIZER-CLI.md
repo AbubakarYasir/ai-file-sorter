@@ -2,7 +2,9 @@
 
 This document defines the command-line and headless interface of my fork.
 
-The GUI remains the normal everyday interface. The CLI is the **power-user and automation surface**: it should expose the same core services without creating a second implementation of organizer logic. Some diagnostics, batch controls, and machine-readable operations may intentionally remain CLI-only.
+The CLI is the **canonical product surface** for human control, automation, scripting, diagnostics, and long-running jobs. The GUI is a secondary client over the same core services. Some diagnostics, batch controls, and machine-readable operations may intentionally remain CLI-only.
+
+If an important capability cannot be invoked safely through the CLI/core contract, I do not consider it fully implemented in this fork.
 
 ## Status legend
 
@@ -15,16 +17,18 @@ Every command is labelled so this document does not present designs as finished 
 
 ## Core rules
 
-1. GUI and CLI call the same core services.
+1. CLI, GUI, and future agents call the same core services.
 2. Analysis comes before mutation.
-3. Source-filesystem read-only commands may still write application state, caches, logs, or the local index database.
-4. JSON output is a first-class machine contract.
-5. Commands use meaningful exit codes.
-6. Partial/inaccessible scans are reported instead of being disguised as complete scans.
+3. Source-filesystem read-only commands may still write organizer-owned state, caches, logs, checkpoints, or local indexes.
+4. JSON/JSONL output is a first-class machine contract.
+5. Commands use meaningful stable exit codes.
+6. Partial/inaccessible observations are reported instead of being disguised as complete scans.
 7. Windows permissions are respected; the organizer does not bypass ACLs or security boundaries.
-8. Model output is data, not authorization to mutate files.
-9. Mutation must go through the appropriate plan/review/apply/audit boundary.
-10. A future agent should prefer CLI/core contracts over visually driving the GUI when an equivalent supported command exists.
+8. Model output is evidence/inference, not authorization to mutate files.
+9. Mutation must go through plan/validation/simulation/review/apply/audit boundaries.
+10. Long-running work should eventually be detachable from the terminal through the durable job runtime.
+11. Explicit CLI flags, natural-language requests, policy, profiles/defaults, and inferred assumptions resolve into the same typed `JobSpec` model.
+12. Machine mode must remain parseable: no progress/ANSI noise on stdout when structured output is requested.
 
 ---
 
@@ -43,7 +47,7 @@ aifilesorter --headless-apply --review-file <review-plan.json> ...
 
 My command family is added alongside this behavior rather than replacing it.
 
-The parsers are intentionally independent: the upstream parser only activates for explicit `--headless*` request flags, while my personal index parser activates for the `index` command.
+The parsers are intentionally independent: the upstream parser only activates for explicit `--headless*` request flags, while the personal command parser activates for fork subcommands such as `index`.
 
 ---
 
@@ -51,9 +55,9 @@ The parsers are intentionally independent: the upstream parser only activates fo
 
 ## `index`
 
-**Status: Implemented in fork (Phase 1).**
+**Status: Implemented in fork (Phase 1), still under production Windows validation.**
 
-`index` updates my persistent `personal_file_index.db` inventory without moving, renaming, deleting, or editing the files being scanned.
+`index` updates the persistent `personal_file_index.db` inventory without moving, renaming, deleting, or editing the files being scanned.
 
 The command does **not** require an LLM. It is routed before GUI startup and before LLM-selection logic.
 
@@ -81,7 +85,7 @@ aifilesorter index `
   --json
 ```
 
-The two forms may be combined.
+The two forms may be combined, but duplicate or overlapping ancestor/descendant roots are rejected because Phase 1 does not yet implement many-to-many root ownership.
 
 ### Implemented options
 
@@ -90,11 +94,18 @@ The two forms may be combined.
 --json                      emit one machine-readable result object
 --hash <off|all>            SHA-256 policy; default is off
 --include-hidden            include hidden entries
---follow-reparse-points     follow symlinks/reparse points; off by default
 --project-root-only         mark protected projects but do not index their contents
 --no-project-protection     disable protected-project detection for this scan
 --help, -h                  show command help
 ```
+
+### Recognized but deliberately unavailable in Phase 1
+
+```text
+--follow-reparse-points
+```
+
+Reparse/symlink following is currently **fail-closed**. The option is rejected until bounded traversal, cycle detection, root-boundary semantics, and regression tests exist. It must not silently enable unbounded traversal.
 
 Not implemented yet:
 
@@ -104,13 +115,12 @@ Not implemented yet:
 --exclude <pattern>
 --status-file <path>
 --database <path>
+--metadata-only
 ```
 
-Do not rely on those planned forms until they are implemented and tested.
+Do not rely on planned forms until they are implemented and tested.
 
 ### Default project behavior
-
-The default is deliberately different from the first prototype.
 
 A recognized Git/Node/Python/etc. project is marked as a **protected project** so later organization planning knows its relative structure must not be casually rearranged. The read-only index may still traverse useful source files inside it.
 
@@ -135,7 +145,7 @@ protected from generic filesystem mutation
 hidden from the read-only knowledge index
 ```
 
-`--project-root-only` restores the conservative behavior of indexing only the recognized project root.
+`--project-root-only` indexes only the recognized project root.
 
 `--no-project-protection` is an advanced indexing option; it removes project protection metadata/detection for that scan. It is not permission for future mutation code to ignore unrelated safety rules.
 
@@ -152,32 +162,27 @@ all   hash each indexed regular file
 
 If a previously indexed file already has a complete hash, a later metadata-only scan preserves that complete hash rather than erasing it.
 
-`smart` remains planned for later duplicate/identity work.
+`smart` remains planned for later duplicate/content-identity work. Long-term identity is expected to use staged file identity/fingerprint logic rather than full-hashing every file during discovery.
 
-### Presence semantics
+### Observation and policy semantics
 
-The index distinguishes absence from inability to observe.
+The index distinguishes physical observation from scan policy.
 
-For a **complete rescan** of a root:
-
-```text
-previously indexed entry not seen now
-→ mark it not present/stale
-```
-
-For a **missing, inaccessible, or incomplete root**:
+Conceptually:
 
 ```text
-root could not be observed reliably
-→ preserve previous presence state
-→ record the run as partial
+observation_state
+  present / missing / unknown
+
+policy_state
+  included / hidden / excluded / system / reparse-skipped / protected / ...
 ```
 
-This prevents a disconnected drive, permission problem, or failed traversal from being misinterpreted as mass deletion.
+A file omitted because `--include-hidden` changed is not automatically a deleted file. A missing/inaccessible root preserves prior trustworthy physical knowledge as unknown/unchanged rather than manufacturing mass deletion.
 
 ### System-path safety
 
-Windows system roots are detected by their actual paths/environment roots rather than by globally blacklisting ordinary folder names.
+Windows system roots are detected by actual paths/environment roots rather than by globally blacklisting ordinary folder names.
 
 For example, a user-owned path such as:
 
@@ -250,7 +255,9 @@ The command participates in the same `AnalysisRuntimeLock` used by the GUI/headl
 
 The Windows starter recognizes `index` as a synchronous command invocation. It forwards the command to the main executable, keeps the console path available for output, waits for the result, and does not require CUDA/Vulkan/GGML discovery because indexing itself does not use an LLM.
 
-This keeps a metadata-only command independent from GPU/model readiness.
+Unicode root arguments are decoded from the native wide Windows command line rather than depending on the active local code page.
+
+A full native MSVC/vcpkg build plus packaged-launcher smoke test remains a Phase 1 exit gate before whole-drive use is approved.
 
 ### Read-only boundary
 
@@ -283,42 +290,128 @@ silently fix permissions
 The longer-term top-level model is:
 
 ```text
-aifilesorter <command> [options]
+aifs <command> [options]
 ```
 
-with command families such as:
+The `aifs` name is the long-term product shorthand; current builds still use the upstream executable naming unless/until packaging is changed deliberately.
+
+Planned command families include:
 
 ```text
-index        implemented
-search       planned
-inspect      planned
-extract      planned
-ocr          planned
-duplicates   planned
-policy       planned
-plan         planned
-review       planned fork command
-apply        planned fork command
-undo         planned fork command
-history      planned fork command
-db           planned
-doctor       planned
+index             implemented foundation
+job               planned
+daemon            planned
+snapshot          planned
+diff              planned
+reconcile         planned
+estimate          planned
+search            planned
+inspect           planned
+extract           planned
+ocr               planned
+related           planned
+duplicates        planned
+policy            planned
+plan              planned
+review            planned fork command
+apply             planned fork command
+undo              planned fork command
+history           planned fork command
+models            planned
+components        planned
+db                planned
+doctor            planned
+explain-request   planned
+shell             planned
 ```
+
+## `job`
+
+**Status: Planned. Tracking: Issue #6.**
+
+Long jobs become durable entities rather than terminal-bound function calls.
+
+Target forms:
+
+```powershell
+aifs job list
+aifs job status 194
+aifs job tail 194
+aifs job pause 194
+aifs job resume 194
+aifs job cancel 194
+```
+
+`resume` means continuing from persisted tasks/checkpoints, not merely launching a new scan that reuses some rows.
+
+## `daemon`
+
+**Status: Planned. Tracking: Issue #6.**
+
+Potential durable organizer runtime for long work:
+
+```powershell
+aifs daemon start
+aifs daemon status
+aifs daemon stop
+```
+
+The exact service/Windows-service packaging is not fixed yet. The invariant is that hours of completed work should not disappear merely because a shell closes.
+
+## `snapshot`, `diff`, and `reconcile`
+
+**Status: Planned. Tracking: Issue #8.**
+
+Represent trustworthy observation epochs and provider reconciliation.
+
+```powershell
+aifs snapshot create D:\
+aifs snapshot list
+aifs diff snapshot:123 snapshot:124
+aifs reconcile D:\ --provider everything --against native
+```
+
+Provider disagreement/gaps become explicit reconciliation work rather than automatic deletion.
+
+## `estimate`
+
+**Status: Planned.**
+
+Estimate the cost/scope of expensive work before starting it.
+
+```powershell
+aifs estimate ocr D:\Library
+aifs estimate analyze D:\Archive --json
+```
+
+Potential estimates:
+
+```text
+entries
+bytes likely to read
+hash candidates
+OCR pages/documents
+cache growth
+local compute tasks
+cloud tokens/cost if enabled
+```
+
+Future hard budgets may include `--max-read`, `--max-pages`, `--max-runtime`, `--max-cache-growth`, `--max-cloud-cost`, and `--max-cloud-tokens`.
 
 ## `search`
 
 **Status: Planned.**
 
-Search filenames, metadata, extracted text, bibliographic fields, and later semantic signals.
+Search filenames, metadata, extracted text, OCR, bibliographic fields, relationships, and later semantic signals.
 
 Examples:
 
 ```powershell
-aifilesorter search "الإمام النووي"
+aifs search "الإمام النووي"
 ```
 
 ```powershell
-aifilesorter search "Flutter PDF outline" --json
+aifs search "Flutter PDF outline" --json
 ```
 
 Potential filters:
@@ -334,7 +427,7 @@ Potential filters:
 --limit <n>
 ```
 
-Deterministic matches and semantic/model-derived matches should remain distinguishable.
+Results should expose why they matched: path, metadata, exact text/OCR, bibliography, relationship graph, or semantic similarity. Deterministic and semantic evidence remain distinguishable.
 
 ## `inspect`
 
@@ -343,22 +436,22 @@ Deterministic matches and semantic/model-derived matches should remain distingui
 Show everything the organizer currently knows about one file/folder without changing it.
 
 ```powershell
-aifilesorter inspect "D:\Books\book.pdf" --json
+aifs inspect "D:\Books\book.pdf" --json
 ```
 
-Possible output fields include identity/hash state, extraction/OCR state, language, summary, bibliography, relationships, project membership, and policy classification.
+Possible output fields include physical/file identity, hash state, extraction/OCR state, language, summary, bibliography, relationships/lineage, project membership, policy/privacy classification, and provenance.
 
 ## `extract`
 
 **Status: Planned.**
 
-Run deterministic document extraction and persist/cache the result.
+Run deterministic document/metadata extraction and persist/cache the result.
 
 ```powershell
-aifilesorter extract "D:\Books" --only-missing
+aifs extract "D:\Books" --only-missing
 ```
 
-This should reuse upstream document-reading capabilities rather than creating a separate parser stack.
+This should reuse upstream document-reading capabilities and delegated metadata workers rather than creating a competing parser stack.
 
 ## `ocr`
 
@@ -367,7 +460,7 @@ This should reuse upstream document-reading capabilities rather than creating a 
 OCR documents that lack sufficient embedded text.
 
 ```powershell
-aifilesorter ocr "D:\Books\Arabic" `
+aifs ocr "D:\Books\Arabic" `
   --language ara+urd+eng `
   --only-missing-text
 ```
@@ -384,7 +477,19 @@ Potential controls:
 --json
 ```
 
-`identify` should mean strategic-page OCR first, not blindly OCRing every page of every PDF.
+`identify` means strategic-page OCR first, not blindly OCRing every page of every PDF.
+
+## `related`
+
+**Status: Planned.**
+
+Inspect evidence-backed relationships/lineage:
+
+```powershell
+aifs related "D:\Books\book.pdf"
+```
+
+Potential relation types include edition, translation, volume, annotation, OCR derivative, export, project membership, supplement, exact duplicate, and possible near duplicate.
 
 ## `duplicates`
 
@@ -393,7 +498,7 @@ Potential controls:
 Early versions report duplicate candidates; they do not auto-delete them.
 
 ```powershell
-aifilesorter duplicates --root "C:\Users\Hp" --exact --json
+aifs duplicates --root "C:\Users\Hp" --exact --json
 ```
 
 Potential modes:
@@ -406,30 +511,35 @@ Potential modes:
 --report <file>
 ```
 
+Hardlinks, derivatives, editions, translations, and exact duplicate bytes are distinct concepts.
+
 ## `policy`
 
-**Status: Planned.**
+**Status: Planned. Tracking: Issue #7.**
 
-Validate and explain `ORGANIZE.md` policy without changing files.
-
-```powershell
-aifilesorter policy validate ORGANIZE.md
-```
+Validate, test, diff, and explain structured `ORGANIZE.md` policy without changing files.
 
 ```powershell
-aifilesorter policy explain "C:\Users\Hp\Downloads\some-file.pdf"
+aifs policy validate ORGANIZE.md
+aifs policy lint ORGANIZE.md
+aifs policy test ORGANIZE.md
+aifs policy diff old/ORGANIZE.md new/ORGANIZE.md
+aifs policy explain "C:\Users\Hp\Downloads\some-file.pdf"
 ```
 
-Expected subcommands:
+Policy is parsed into structured rules/AST rather than pasted into an opaque model prompt. Policy errors must fail before a later planning/apply operation.
 
-```text
-policy validate
-policy print
-policy explain
-policy test
+## `explain-request`
+
+**Status: Planned. Tracking: Issue #7.**
+
+Show how natural-language intent, CLI flags, profiles/defaults, policy, and prior answers resolved into the typed `JobSpec` before expensive work begins.
+
+```powershell
+aifs explain-request <job-or-draft>
 ```
 
-Policy errors must fail before a later planning/apply operation.
+The output should make inferred assumptions and unresolved high-impact questions explicit.
 
 ## `plan`
 
@@ -438,27 +548,29 @@ Policy errors must fail before a later planning/apply operation.
 Generate an organization plan without applying it.
 
 ```powershell
-aifilesorter plan `
+aifs plan `
   --root "C:\Users\Hp\Downloads" `
   --policy ORGANIZE.md `
   --output organization-plan.json
 ```
 
-A plan should record proposed paths/names, evidence, reasons, confidence, warnings, relationships, and policy decisions.
+A plan records proposed paths/names/actions, source identity, requirements, policy rules, evidence, reasons, confidence, relationships, unresolved questions, and model/worker provenance. It also carries schema/config/JobSpec/policy identity needed for reproducibility and freshness validation.
 
 ## `review`
 
 **Status: Planned as a personal-organizer command; upstream already has review-plan concepts.**
 
 ```powershell
-aifilesorter review organization-plan.json
+aifs review organization-plan.json
 ```
 
 Machine validation may later use:
 
 ```powershell
-aifilesorter review organization-plan.json --check --json
+aifs review organization-plan.json --check --json
 ```
+
+Interactive review may use a terminal UI later, but the underlying plan remains a structured artifact.
 
 ## `apply`
 
@@ -467,7 +579,7 @@ aifilesorter review organization-plan.json --check --json
 Apply an already generated and approved plan.
 
 ```powershell
-aifilesorter apply organization-plan.json
+aifs apply organization-plan.json
 ```
 
 An `apply` operation must not silently regenerate its approved plan with fresh model output.
@@ -475,17 +587,19 @@ An `apply` operation must not silently regenerate its approved plan with fresh m
 Required safeguards include:
 
 ```text
-validate plan schema
+validate plan schema/version
 validate source identity/current state
-validate conflicts
-validate policy
-acquire runtime lock
-apply
-write audit record
+validate destination conflicts
+validate policy/answers
+simulate paths/collisions/space/relationships
+acquire mutation/runtime lock
+apply recoverable chunks
+verify cross-volume copies before authorized source removal
+write audit checkpoints/results
 return per-entry result
 ```
 
-A future `--force` must be narrow; it is never a permission to bypass Windows ACLs or arbitrary safety boundaries.
+A future `--force` must be narrow; it is never permission to bypass Windows ACLs or arbitrary safety boundaries.
 
 ## `undo` and `history`
 
@@ -494,26 +608,54 @@ A future `--force` must be narrow; it is never a permission to bypass Windows AC
 Possible forms:
 
 ```powershell
-aifilesorter history --limit 20
+aifs history --limit 20
+aifs undo --plan-id 123
 ```
+
+Undo should accurately report anything that can no longer be reversed. The tool must not claim global transaction guarantees the filesystem cannot provide.
+
+## `models`
+
+**Status: Planned.**
+
+Inspect and benchmark local/remote model capabilities on representative tasks.
+
+Potential commands:
 
 ```powershell
-aifilesorter undo --plan-id 123
+aifs models list
+aifs models doctor
+aifs models benchmark
 ```
 
-Undo should accurately report anything that can no longer be reversed.
+Model selection should eventually use measured task quality, latency, RAM/VRAM, privacy, and cost rather than generic leaderboard reputation alone.
+
+## `components`
+
+**Status: Planned.**
+
+Inspect optional providers/workers and where they are found.
+
+```powershell
+aifs components list
+aifs components doctor
+aifs components paths
+```
+
+The organizer should not silently install huge runtimes/models or modify another application's configuration.
 
 ## `db`
 
 **Status: Planned.**
 
-Power-user index/database maintenance.
+Power-user control-plane/index maintenance.
 
 Possible commands:
 
 ```text
 db stats
 db check
+db backup
 db vacuum
 db export
 db stale
@@ -534,15 +676,27 @@ Potential checks:
 
 ```text
 application/build version
-personal index health
-configured LLM
+control DB/index health
+Everything/native provider health and capabilities
+provider cursors/reconciliation state
+configured local/remote LLMs
 GPU/runtime availability
 OCR engines/language packs
 PDF extraction support
 filesystem permissions
-ORGANIZE.md policy status
+policy status
+optional workers/components
+cache/search-index health
 upstream/fork build metadata
 ```
+
+Each optional capability should report a state such as healthy, missing, unsupported, degraded, misconfigured, or version-incompatible.
+
+## `shell`
+
+**Status: Planned.**
+
+Optional UTF-8 interactive REPL for advanced sessions. It must still compile interactions into structured commands/JobSpecs rather than creating a hidden conversational bypass around policy and safety.
 
 ---
 
@@ -552,16 +706,17 @@ Commands should be classified by effect:
 
 ```text
 SOURCE-FILESYSTEM READ ONLY
-  index, search, inspect, extract, ocr, duplicates, policy validate, plan, doctor
+  index, snapshot, diff, reconcile, estimate, search, inspect,
+  extract, ocr, related, duplicates, policy, plan, doctor, explain-request
 
-DATABASE MAINTENANCE
-  selected db commands
+ORGANIZER STATE / CONTROL
+  job, daemon, models, components, selected db commands
 
 FILESYSTEM MUTATION
   apply, undo
 
 DEVELOPER / EXPERIMENTAL
-  raw traversal, diagnostics, test hooks
+  raw traversal, diagnostics, benchmarks, fault/test hooks
 ```
 
 Extraction/OCR may write organizer-owned cache/index data while remaining read-only toward source documents.
@@ -571,7 +726,7 @@ Extraction/OCR may write organizer-owned cache/index data while remaining read-o
 The CLI inherits the privileges of the process that launched it.
 
 ```text
-normal PowerShell       → normal user access
+normal PowerShell        → normal user access
 Administrator PowerShell → elevated user access
 ```
 
@@ -579,9 +734,38 @@ The application may report inaccessible paths. It must not attempt to defeat Win
 
 ## Output rules
 
-Human output is for interactive use. JSON is for automation.
+Human output is for interactive use. JSON/JSONL is for automation.
 
-Machine output should use stable `kind` identifiers, explicit statuses, and predictable types. Diagnostics belong on stderr when stdout is intended to remain parseable.
+Machine output should use versioned stable `kind` identifiers, explicit statuses, predictable types, and documented exit codes. Diagnostics/progress belong on stderr or an event channel when stdout is intended to remain parseable.
+
+Totals/progress must say when they are estimated or unknown rather than inventing a percentage.
+
+## Budgets and control
+
+Long-term commands may accept cross-cutting controls such as:
+
+```text
+--offline
+--local-only
+--max-read
+--max-pages
+--max-runtime
+--max-cache-growth
+--max-cloud-cost
+--max-cloud-tokens
+--io-jobs
+--cpu-jobs
+--gpu-jobs
+--read-rate
+--cloud-concurrency
+--idle-only
+--pause-on-battery
+--profile <name>
+--explain
+--why
+```
+
+These remain planned until implemented and tested. Profiles are inspectable convenience bundles, not secret behavior.
 
 ## Agent usage
 
@@ -592,9 +776,10 @@ Preferred model:
 ```text
 agent asks core for facts
 → core returns structured result
-→ agent generates/proposes a plan
-→ policy/user approval is obtained where required
-→ core applies
+→ intent/policy/questions are resolved
+→ core generates a plan
+→ user/policy approval is obtained where required
+→ core validates/simulates/applies
 → audit/undo state is recorded
 ```
 
