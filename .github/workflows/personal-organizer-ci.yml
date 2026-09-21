@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   personal-index-integration:
-    name: Personal index integration
+    name: Personal index integration (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -55,3 +55,43 @@ jobs:
           test -f docs/PERSONAL-ORGANIZER-CLI.md
           test -f docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
           git check-ignore -q docs/PERSONAL-ORGANIZER-ROADMAP.md && exit 1 || true
+
+  personal-index-windows:
+    name: Personal index integration (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MSYS2 test toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-curl
+
+      - name: Run Windows personal file index integration test
+        shell: msys2 {0}
+        run: bash tests/run_personal_index_tests.sh
+
+      - name: Run Windows personal index query test
+        shell: msys2 {0}
+        run: bash tests/run_personal_index_query_tests.sh
+
+      - name: Run Windows personal index command test
+        shell: msys2 {0}
+        run: bash tests/run_personal_index_command_tests.sh
+
+      - name: Syntax-check Windows launcher
+        shell: msys2 {0}
+        run: |
+          g++ -std=c++20 -fsyntax-only \
+            $(pkg-config --cflags Qt6Core Qt6Gui Qt6Widgets Qt6Network) \
+            -Iapp/include \
+            app/startapp_windows.cpp
