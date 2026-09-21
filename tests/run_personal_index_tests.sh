@@ -4,11 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/tests/build-personal-index"
 mkdir -p "$BUILD_DIR"
-mkdir -p "$BUILD_DIR/spdlog/sinks"
-mkdir -p "$BUILD_DIR/spdlog/fmt"
 
 TEST_SRC="$BUILD_DIR/personal_index_test.cpp"
-STUB_SRC="$BUILD_DIR/logger_stub.cpp"
+UTILS_STUB_SRC="$BUILD_DIR/utils_path_stub.cpp"
 OUTPUT="$BUILD_DIR/personal_index_test"
 
 cat > "$TEST_SRC" <<'CPP'
@@ -107,7 +105,8 @@ int main() {
     write_file(root / "ordinary" / "notes.md", "notes\n");
     write_file(root / "ExcludedStuff" / "ignore.txt", "ignore me\n");
 
-    // A recognized Node.js project must be indexed as one protected unit.
+    // A recognized Node.js project must be indexed as one protected unit in the
+    // current conservative Phase 1 project mode.
     write_file(root / "TaskApp" / "package.json", "{\"name\":\"task-app\"}\n");
     write_file(root / "TaskApp" / "src" / "main.js", "console.log('ok');\n");
 
@@ -136,7 +135,8 @@ int main() {
         fail("Expected root and ordinary directory to be indexed");
     }
 
-    if (!fs::exists(root / "document.txt") || !fs::exists(root / "TaskApp" / "src" / "main.js")) {
+    if (!fs::exists(root / "document.txt") ||
+        !fs::exists(root / "TaskApp" / "src" / "main.js")) {
         fail("Read-only scan changed source files");
     }
 
@@ -156,7 +156,8 @@ int main() {
             quote_sql(root_utf8) + ";");
     if (present_count != 5) {
         sqlite3_close(db);
-        fail("Expected 5 present index rows after first scan, got " + std::to_string(present_count));
+        fail("Expected 5 present index rows after first scan, got " +
+             std::to_string(present_count));
     }
 
     const auto protected_type = scalar_int64(
@@ -195,8 +196,8 @@ int main() {
         fail("Explicitly excluded directory was traversed");
     }
 
-    // A subsequent scan should mark a deleted file as no longer present without
-    // deleting its historical index row.
+    // A subsequent successful scan should mark a deleted file as no longer
+    // present without deleting its historical index row.
     fs::remove(root / "ordinary" / "notes.md");
     PersonalFileIndexOptions second_options = options;
     second_options.compute_sha256 = false;
@@ -216,7 +217,8 @@ int main() {
         fail("Deleted file was not marked stale on the next scan");
     }
 
-    const auto run_count = scalar_int64(db, "SELECT COUNT(*) FROM personal_index_scan_runs;");
+    const auto run_count = scalar_int64(
+        db, "SELECT COUNT(*) FROM personal_index_scan_runs;");
     if (run_count != 2) {
         sqlite3_close(db);
         fail("Expected exactly two persisted scan runs");
@@ -228,93 +230,31 @@ int main() {
 }
 CPP
 
-cat > "$STUB_SRC" <<'CPP'
-#include "Logger.hpp"
+# This focused integration test only needs the UTF-8 path helpers from Utils.
+# Compiling all of Utils.cpp would pull unrelated networking/GPU/logger code into
+# the test and make this test depend on subsystems it is not exercising.
+cat > "$UTILS_STUB_SRC" <<'CPP'
+#include "Utils.hpp"
+
 #include <filesystem>
-
-std::string Logger::get_log_directory() {
-    return std::filesystem::temp_directory_path().string();
-}
-
-void Logger::setup_loggers() {}
-
-std::shared_ptr<spdlog::logger> Logger::get_logger(const std::string&) {
-    return nullptr;
-}
-
-std::string Logger::get_log_file_path(const std::string& log_dir, const std::string& log_name) {
-    return log_dir + "/" + log_name;
-}
-CPP
-
-cat > "$BUILD_DIR/spdlog/spdlog.h" <<'CPP'
-#pragma once
-#include <chrono>
-#include <memory>
 #include <string>
 
-namespace spdlog {
-namespace level {
-enum level_enum {
-    trace,
-    debug,
-    info,
-    warn,
-    err,
-    critical,
-    off
-};
+std::string Utils::path_to_utf8(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    const auto value = path.u8string();
+    return std::string(reinterpret_cast<const char*>(value.data()), value.size());
+#else
+    return path.string();
+#endif
 }
 
-class logger {
-public:
-    template <typename... Args>
-    void log(level::level_enum, const std::string&, Args&&...) {}
-
-    template <typename... Args>
-    void info(const std::string&, Args&&...) {}
-
-    template <typename... Args>
-    void warn(const std::string&, Args&&...) {}
-
-    template <typename... Args>
-    void error(const std::string&, Args&&...) {}
-
-    void flush_on(level::level_enum) {}
-    void set_level(level::level_enum) {}
-};
-
-inline std::shared_ptr<logger> get(const std::string&) { return nullptr; }
-inline void register_logger(std::shared_ptr<logger>) {}
-inline void flush_every(std::chrono::seconds) {}
-inline void set_level(level::level_enum) {}
-inline void info(const std::string&) {}
-} // namespace spdlog
-CPP
-
-cat > "$BUILD_DIR/spdlog/sinks/stdout_color_sinks.h" <<'CPP'
-#pragma once
-namespace spdlog { namespace sinks { class stdout_color_sink_mt {}; } }
-CPP
-
-cat > "$BUILD_DIR/spdlog/sinks/basic_file_sink.h" <<'CPP'
-#pragma once
-namespace spdlog { namespace sinks { class basic_file_sink_mt {}; } }
-CPP
-
-cat > "$BUILD_DIR/spdlog/sinks/rotating_file_sink.h" <<'CPP'
-#pragma once
-namespace spdlog { namespace sinks { class rotating_file_sink_mt {}; } }
-CPP
-
-cat > "$BUILD_DIR/spdlog/fmt/fmt.h" <<'CPP'
-#pragma once
-#include <string>
-namespace fmt {
-inline const std::string& runtime(const std::string& value) { return value; }
-template <typename... Args>
-std::string format(const std::string& fmt_str, Args&&...) { return fmt_str; }
-} // namespace fmt
+std::filesystem::path Utils::utf8_to_path(const std::string& utf8_path) {
+#if defined(_WIN32)
+    return std::filesystem::u8path(utf8_path);
+#else
+    return std::filesystem::path(utf8_path);
+#endif
+}
 CPP
 
 QT_HEADERS="$(qmake6 -query QT_INSTALL_HEADERS 2>/dev/null || true)"
@@ -325,7 +265,6 @@ if [[ -z "$QT_HEADERS" || -z "$QT_LIB_DIR" ]]; then
 fi
 
 INCLUDES=(
-    -I"$BUILD_DIR"
     -I"$ROOT_DIR/app/include"
     -I"$QT_HEADERS"
     -I"$QT_HEADERS/QtCore"
@@ -339,10 +278,9 @@ LIBS=(
 )
 
 g++ -std=c++20 -fPIC "${INCLUDES[@]}" \
-    "$TEST_SRC" "$STUB_SRC" \
+    "$TEST_SRC" "$UTILS_STUB_SRC" \
     "$ROOT_DIR/app/lib/PersonalFileIndex.cpp" \
     "$ROOT_DIR/app/lib/ProtectedProjectDetector.cpp" \
-    "$ROOT_DIR/app/lib/Utils.cpp" \
     -o "$OUTPUT" "${LIBS[@]}"
 
 "$OUTPUT"
