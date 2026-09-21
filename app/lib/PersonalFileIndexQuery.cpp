@@ -175,6 +175,7 @@ std::optional<PersonalFileIndexStats> PersonalFileIndexQuery::stats() const
     result.present_directories = *present_directories;
     result.present_protected_projects = *protected_projects;
     result.missing_entries = *missing_entries;
+    result.stale_entries = *missing_entries;
     result.unknown_entries = *unknown_entries;
     result.policy_skipped_entries = *policy_skipped_entries;
     result.hashed_files = *hashed_files;
