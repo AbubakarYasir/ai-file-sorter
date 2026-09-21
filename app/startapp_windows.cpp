@@ -23,6 +23,7 @@
 #include <utility>
 
 #include <windows.h>
+#include <shellapi.h>
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
 #endif
@@ -46,6 +47,26 @@ enum class BackendSelection {
     Cuda,
     Vulkan
 };
+
+QStringList native_process_arguments()
+{
+    int wide_argc = 0;
+    LPWSTR* wide_argv = CommandLineToArgvW(GetCommandLineW(), &wide_argc);
+    if (!wide_argv || wide_argc <= 0) {
+        if (wide_argv) {
+            LocalFree(wide_argv);
+        }
+        return QCoreApplication::arguments();
+    }
+
+    QStringList arguments;
+    arguments.reserve(wide_argc);
+    for (int i = 0; i < wide_argc; ++i) {
+        arguments.append(QString::fromWCharArray(wide_argv[i]));
+    }
+    LocalFree(wide_argv);
+    return arguments;
+}
 
 BackendOverride parseBackendOverride(QString value) {
     value = value.trimmed().toLower();
@@ -597,11 +618,11 @@ struct BackendAvailability {
     QString cudaFailureReason;
 };
 
-BackendOverrides parse_backend_overrides(int argc, char* argv[])
+BackendOverrides parse_backend_overrides(const QStringList& processArguments)
 {
     BackendOverrides overrides;
-    for (int i = 1; i < argc; ++i) {
-        const QString arg = QString::fromLocal8Bit(argv[i]);
+    for (int i = 1; i < processArguments.size(); ++i) {
+        const QString& arg = processArguments.at(i);
         overrides.observedArgs << arg;
         if (arg.startsWith(QStringLiteral("--cuda="))) {
             overrides.cuda = parseBackendOverride(arg.mid(7));
@@ -626,11 +647,11 @@ bool consume_flag_value(const QString& argument, const char* prefix, QString& ta
     return true;
 }
 
-UpdaterLiveTestArgs parse_updater_live_test_args(int argc, char* argv[])
+UpdaterLiveTestArgs parse_updater_live_test_args(const QStringList& processArguments)
 {
     UpdaterLiveTestArgs args;
-    for (int i = 1; i < argc; ++i) {
-        const QString argument = QString::fromLocal8Bit(argv[i]);
+    for (int i = 1; i < processArguments.size(); ++i) {
+        const QString& argument = processArguments.at(i);
         if (argument == QLatin1String(UpdaterLaunchOptions::kLiveTestFlag)) {
             args.enabled = true;
             continue;
@@ -962,12 +983,12 @@ void configure_runtime_paths(const QString& exeDir,
     }
 }
 
-QStringList build_forwarded_args(int argc, char* argv[], bool &console_log_flag)
+QStringList build_forwarded_args(const QStringList& processArguments, bool &console_log_flag)
 {
     QStringList forwardedArgs;
     console_log_flag = false;
-    for (int i = 1; i < argc; ++i) {
-        const QString arg = QString::fromLocal8Bit(argv[i]);
+    for (int i = 1; i < processArguments.size(); ++i) {
+        const QString& arg = processArguments.at(i);
         if (is_bootstrapper_only_argument(arg)) {
             continue;
         }
@@ -1064,6 +1085,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
 
+    const QStringList processArguments = native_process_arguments();
     const QString exeDir = QCoreApplication::applicationDirPath();
     QDir::setCurrent(exeDir);
 
@@ -1072,10 +1094,10 @@ int main(int argc, char* argv[]) {
         qWarning() << "SetDefaultDllDirectories unavailable; relying on PATH order for DLL resolution.";
     }
 
-    BackendOverrides overrides = parse_backend_overrides(argc, argv);
-    const UpdaterLiveTestArgs updaterLiveTest = parse_updater_live_test_args(argc, argv);
+    BackendOverrides overrides = parse_backend_overrides(processArguments);
+    const UpdaterLiveTestArgs updaterLiveTest = parse_updater_live_test_args(processArguments);
     bool console_log_flag = false;
-    QStringList forwardedArgs = build_forwarded_args(argc, argv, console_log_flag);
+    QStringList forwardedArgs = build_forwarded_args(processArguments, console_log_flag);
     const bool personalIndexInvocation = is_personal_index_invocation(forwardedArgs);
     if (personalIndexInvocation && !console_log_flag) {
         console_log_flag = true;
