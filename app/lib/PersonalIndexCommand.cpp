@@ -15,9 +15,21 @@
 #include <filesystem>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 namespace {
 
@@ -40,6 +52,65 @@ bool is_global_cli_argument(const std::string& argument)
            argument == "--development" ||
            argument == "--test";
 }
+
+bool append_root_argument(
+    const std::string& value,
+    PersonalIndexCommand::ParseResult* result)
+{
+    if (!result) {
+        return false;
+    }
+
+    try {
+        result->options.roots.push_back(Utils::utf8_to_path(value));
+        return true;
+    } catch (const std::exception& ex) {
+        result->error = std::string("Invalid UTF-8 filesystem root: ") + ex.what();
+        return false;
+    }
+}
+
+#ifdef _WIN32
+std::string wide_to_utf8(const wchar_t* value)
+{
+    if (!value || value[0] == L'\0') {
+        return {};
+    }
+
+    const int source_length = static_cast<int>(std::wcslen(value));
+    const int required = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value,
+        source_length,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (required <= 0) {
+        throw std::system_error(
+            std::error_code(GetLastError(), std::system_category()),
+            "WideCharToMultiByte failed while decoding the Windows command line");
+    }
+
+    std::string result(static_cast<std::size_t>(required), '\0');
+    const int written = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value,
+        source_length,
+        result.data(),
+        required,
+        nullptr,
+        nullptr);
+    if (written != required) {
+        throw std::system_error(
+            std::error_code(GetLastError(), std::system_category()),
+            "WideCharToMultiByte failed while decoding the Windows command line");
+    }
+    return result;
+}
+#endif
 
 std::string make_job_id()
 {
@@ -185,7 +256,9 @@ PersonalIndexCommand::ParseResult PersonalIndexCommand::parse(int argc, char** a
             }
             ++i;
             result.consumed_arguments[static_cast<std::size_t>(i)] = true;
-            result.options.roots.emplace_back(argv[i]);
+            if (!append_root_argument(argv[i], &result)) {
+                break;
+            }
             continue;
         }
         if (const auto value = inline_value(argument, "--root")) {
@@ -193,7 +266,9 @@ PersonalIndexCommand::ParseResult PersonalIndexCommand::parse(int argc, char** a
                 result.error = "Missing value for --root.";
                 break;
             }
-            result.options.roots.emplace_back(*value);
+            if (!append_root_argument(*value, &result)) {
+                break;
+            }
             continue;
         }
 
@@ -232,7 +307,9 @@ PersonalIndexCommand::ParseResult PersonalIndexCommand::parse(int argc, char** a
             break;
         }
 
-        result.options.roots.emplace_back(argument);
+        if (!append_root_argument(argument, &result)) {
+            break;
+        }
     }
 
     if (!result.help_requested && result.error.empty() && result.options.roots.empty()) {
@@ -240,6 +317,51 @@ PersonalIndexCommand::ParseResult PersonalIndexCommand::parse(int argc, char** a
     }
 
     return result;
+}
+
+PersonalIndexCommand::ParseResult PersonalIndexCommand::parse_process_command_line(
+    int argc,
+    char** argv)
+{
+#ifdef _WIN32
+    int wide_argc = 0;
+    LPWSTR* wide_argv = CommandLineToArgvW(GetCommandLineW(), &wide_argc);
+    if (!wide_argv || wide_argc <= 0) {
+        if (wide_argv) {
+            LocalFree(wide_argv);
+        }
+        return parse(argc, argv);
+    }
+
+    std::vector<std::string> utf8_arguments;
+    std::vector<char*> utf8_argv;
+    try {
+        utf8_arguments.reserve(static_cast<std::size_t>(wide_argc));
+        for (int i = 0; i < wide_argc; ++i) {
+            utf8_arguments.push_back(wide_to_utf8(wide_argv[i]));
+        }
+        LocalFree(wide_argv);
+        wide_argv = nullptr;
+
+        utf8_argv.reserve(utf8_arguments.size());
+        for (auto& argument : utf8_arguments) {
+            utf8_argv.push_back(argument.data());
+        }
+        return parse(static_cast<int>(utf8_argv.size()), utf8_argv.data());
+    } catch (const std::exception& ex) {
+        if (wide_argv) {
+            LocalFree(wide_argv);
+        }
+        ParseResult fallback = parse(argc, argv);
+        if (fallback.requested) {
+            fallback.error = std::string("Could not decode the Unicode Windows command line: ") +
+                             ex.what();
+        }
+        return fallback;
+    }
+#else
+    return parse(argc, argv);
+#endif
 }
 
 std::string PersonalIndexCommand::usage_text()
