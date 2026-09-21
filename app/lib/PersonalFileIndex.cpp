@@ -790,6 +790,7 @@ PersonalFileIndexScanSummary PersonalFileIndex::scan(
             continue;
         }
 
+        bool root_persisted_as_project = false;
         if (options.protect_project_directories) {
             if (auto match = impl_->project_detector.detect(root);
                 match && ProtectedProjectDetector::should_skip(*match)) {
@@ -803,24 +804,29 @@ PersonalFileIndexScanSummary PersonalFileIndex::scan(
                     break;
                 }
                 ++summary.protected_projects_indexed;
-                if (!finalize_root_presence(root_string)) {
-                    fatal_database_error = true;
-                    break;
+                root_persisted_as_project = true;
+
+                if (!options.index_protected_project_contents) {
+                    if (!finalize_root_presence(root_string)) {
+                        fatal_database_error = true;
+                    }
+                    continue;
                 }
-                continue;
             }
         }
 
-        EntryMetadata root_metadata = build_metadata(
-            root,
-            kEntryTypeDirectory,
-            false,
-            std::nullopt);
-        if (!persist(root_metadata, root_string)) {
-            fatal_database_error = true;
-            break;
+        if (!root_persisted_as_project) {
+            EntryMetadata root_metadata = build_metadata(
+                root,
+                kEntryTypeDirectory,
+                false,
+                std::nullopt);
+            if (!persist(root_metadata, root_string)) {
+                fatal_database_error = true;
+                break;
+            }
+            ++summary.directories_indexed;
         }
-        ++summary.directories_indexed;
 
         bool root_complete = true;
         std::vector<fs::path> pending_directories;
@@ -903,6 +909,7 @@ PersonalFileIndexScanSummary PersonalFileIndex::scan(
                         continue;
                     }
 
+                    bool protected_project = false;
                     if (options.protect_project_directories) {
                         if (auto match = impl_->project_detector.detect(path);
                             match && ProtectedProjectDetector::should_skip(*match)) {
@@ -916,11 +923,19 @@ PersonalFileIndexScanSummary PersonalFileIndex::scan(
                                 break;
                             }
                             ++summary.protected_projects_indexed;
-                            if (increment_ec) {
-                                break;
+                            protected_project = true;
+
+                            if (options.index_protected_project_contents) {
+                                pending_directories.push_back(path);
                             }
-                            continue;
                         }
+                    }
+
+                    if (protected_project) {
+                        if (increment_ec) {
+                            break;
+                        }
+                        continue;
                     }
 
                     EntryMetadata metadata = build_metadata(
