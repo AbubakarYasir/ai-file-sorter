@@ -32,6 +32,15 @@ std::optional<std::string> inline_value(
     return argument.substr(prefix.size());
 }
 
+bool is_global_cli_argument(const std::string& argument)
+{
+    return argument == "--allow-direct-launch" ||
+           argument == "--console-log" ||
+           argument == "--force-direct-run" ||
+           argument == "--development" ||
+           argument == "--test";
+}
+
 std::string make_job_id()
 {
     const auto ticks = std::chrono::system_clock::now().time_since_epoch();
@@ -102,19 +111,45 @@ PersonalIndexCommand::ParseResult PersonalIndexCommand::parse(int argc, char** a
     ParseResult result;
     result.consumed_arguments.assign(static_cast<std::size_t>(std::max(argc, 0)), false);
 
-    if (argc < 2 || !argv || !argv[1] || std::string(argv[1]) != "index") {
+    if (argc < 2 || !argv) {
+        return result;
+    }
+
+    int command_index = -1;
+    for (int i = 1; i < argc; ++i) {
+        if (!argv[i]) {
+            continue;
+        }
+        const std::string argument = argv[i];
+        if (is_global_cli_argument(argument)) {
+            continue;
+        }
+        if (argument != "index") {
+            return result;
+        }
+        command_index = i;
+        break;
+    }
+
+    if (command_index < 0) {
         return result;
     }
 
     result.requested = true;
-    result.consumed_arguments[1] = true;
+    result.consumed_arguments[static_cast<std::size_t>(command_index)] = true;
 
-    for (int i = 2; i < argc; ++i) {
+    for (int i = command_index + 1; i < argc; ++i) {
         if (!argv[i]) {
             continue;
         }
 
         const std::string argument = argv[i];
+        if (is_global_cli_argument(argument)) {
+            // Global arguments are recognized here only so they do not become
+            // index-usage errors. Leave them unconsumed for main.cpp to process.
+            continue;
+        }
+
         result.consumed_arguments[static_cast<std::size_t>(i)] = true;
 
         if (argument == "--help" || argument == "-h") {
