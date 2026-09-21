@@ -7,9 +7,9 @@
 /**
  * @brief Stable aggregate statistics for the personal file index.
  *
- * Counts describe persisted index state. `present_*` fields only count entries
- * whose latest trustworthy root scan still considers them present. Stale entries
- * remain in the database for history/audit purposes.
+ * Physical observation and indexing policy are separate. A policy-skipped entry
+ * can be physically present or unknown; it is not treated as missing merely
+ * because the current scan chose not to traverse it.
  */
 struct PersonalFileIndexStats {
     std::uint64_t total_entries{0};
@@ -17,7 +17,9 @@ struct PersonalFileIndexStats {
     std::uint64_t present_files{0};
     std::uint64_t present_directories{0};
     std::uint64_t present_protected_projects{0};
-    std::uint64_t stale_entries{0};
+    std::uint64_t missing_entries{0};
+    std::uint64_t unknown_entries{0};
+    std::uint64_t policy_skipped_entries{0};
     std::uint64_t hashed_files{0};
     std::uint64_t present_bytes{0};
 
