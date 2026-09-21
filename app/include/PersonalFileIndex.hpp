@@ -10,8 +10,9 @@ struct PersonalFileIndexOptions {
     bool include_hidden{false};
 
     /**
-     * Follow filesystem reparse points/symlinks.
-     * Disabled by default to avoid cycles and accidentally crossing scan roots.
+     * Reserved for later traversal work. Phase 1 rejects true rather than
+     * following reparse points/symlinks without cycle detection, directory
+     * identity tracking, and root-boundary enforcement.
      */
     bool follow_reparse_points{false};
 
@@ -26,7 +27,7 @@ struct PersonalFileIndexOptions {
      * Continue read-only traversal inside recognized protected projects.
      * Enabled by default so repositories remain searchable while generated
      * internals such as .git/node_modules stay excluded by normal scan rules.
-     * Disable for the older conservative "protected root only" behavior.
+     * Disable for the conservative "protected root only" behavior.
      */
     bool index_protected_project_contents{true};
 
@@ -78,7 +79,8 @@ public:
 
     /**
      * @brief Index one or more roots using streaming traversal.
-     * @param roots Files/directories to inventory.
+     * @param roots Files/directories to inventory. Duplicate/overlapping roots are
+     *        rejected in Phase 1 so one entry cannot silently change root ownership.
      * @param options Scan policy. Empty exclusion list uses safe defaults.
      * @return Scan counts, warnings, and persistent run identifier.
      */
