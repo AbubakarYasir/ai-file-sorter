@@ -1,0 +1,45 @@
+name: Personal Organizer CI
+
+on:
+  push:
+    branches:
+      - personal-organizer
+      - 'feature/**'
+  pull_request:
+    branches:
+      - personal-organizer
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-organizer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  personal-index-integration:
+    name: Personal index integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            libsqlite3-dev
+
+      - name: Run personal file index integration test
+        run: bash tests/run_personal_index_tests.sh
+
+      - name: Verify fork documentation is tracked
+        run: |
+          test -f docs/PERSONAL-ORGANIZER-ROADMAP.md
+          git check-ignore -q docs/PERSONAL-ORGANIZER-ROADMAP.md && exit 1 || true
