@@ -13,15 +13,15 @@ echo "Running AI File Sorter test suite"
 echo "================================="
 
 for script in "${TEST_SCRIPTS[@]}"; do
-    if [[ ! -x "$script" ]]; then
-        echo "ERROR: Test script '$script' is missing or not executable." >&2
+    if [[ ! -f "$script" ]]; then
+        echo "ERROR: Test script '$script' is missing." >&2
         exit 1
     fi
 
     name="$(basename "$script")"
     echo ""
     echo ">>> $name"
-    "$script"
+    bash "$script"
 done
 
 echo ""
