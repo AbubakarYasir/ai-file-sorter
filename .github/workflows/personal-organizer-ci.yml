@@ -34,12 +34,18 @@ jobs:
             g++ \
             qt6-base-dev \
             qt6-base-dev-tools \
-            libsqlite3-dev
+            libsqlite3-dev \
+            libcurl4-gnutls-dev
 
       - name: Run personal file index integration test
         run: bash tests/run_personal_index_tests.sh
 
       - name: Verify fork documentation is tracked
         run: |
+          test -f PERSONAL-ORGANIZER.md
+          test -f AGENTS.md
           test -f docs/PERSONAL-ORGANIZER-ROADMAP.md
+          test -f docs/PERSONAL-ORGANIZER-ARCHITECTURE.md
+          test -f docs/PERSONAL-ORGANIZER-CLI.md
+          test -f docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
           git check-ignore -q docs/PERSONAL-ORGANIZER-ROADMAP.md && exit 1 || true
