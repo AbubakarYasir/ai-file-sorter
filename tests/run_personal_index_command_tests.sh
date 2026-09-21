@@ -101,6 +101,15 @@ int main(int argc, char** argv) {
     }
 
     {
+        const auto parsed = parse_args({
+            "aifilesorter", "index", "/tmp/root", "--follow-reparse-points"});
+        if (!parsed.requested || parsed.error.empty() ||
+            parsed.options.scan_options.follow_reparse_points) {
+            fail("Unsafe reparse traversal option must fail closed in Phase 1");
+        }
+    }
+
+    {
         const auto parsed = parse_args({"aifilesorter", "index", "--json"});
         if (!parsed.requested || parsed.error.empty()) {
             fail("Index command without a root should be a usage error");
@@ -144,8 +153,6 @@ int main(int argc, char** argv) {
         fail("Index JSON contract did not contain expected values");
     }
 
-    // The personal index command participates in the same runtime lock used by
-    // GUI/headless analysis. A second command must fail as busy rather than race.
     AnalysisRuntimeLock lock(runtime);
     AnalysisRuntimeLock::Metadata metadata;
     metadata.owner = AnalysisRuntimeLock::Owner::Headless;
