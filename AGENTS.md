@@ -36,6 +36,7 @@ Before a significant change, inspect the relevant current versions of:
 PERSONAL-ORGANIZER.md
 docs/PERSONAL-ORGANIZER-ROADMAP.md
 docs/PERSONAL-ORGANIZER-ARCHITECTURE.md
+docs/PERSONAL-ORGANIZER-SYSTEM-QUALITY-BAR.md
 docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md
 docs/PERSONAL-ORGANIZER-CLI.md
 docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
@@ -57,6 +58,25 @@ Baseline indexing, extraction, OCR/search, planning primitives, and model workfl
 
 Do not create an architecture where the tool becomes unusable merely because an API key, network connection, or cloud quota is unavailable.
 
+### Progressive intelligence
+
+Do not treat a whole-drive inventory as permission to hash/OCR/embed/LLM-analyze the whole drive.
+
+Prefer:
+
+```text
+discover
+→ physical metadata
+→ deterministic metadata/content extraction
+→ selective OCR
+→ lexical/full-text indexing
+→ relationships/bibliography
+→ embeddings where useful
+→ LLM reasoning only where justified
+```
+
+Expensive work should be demand-driven, cacheable, budget-aware, and resumable.
+
 ### Scale is a requirement
 
 Design for:
@@ -66,18 +86,20 @@ Design for:
 millions/tens of millions of entries
 hours-to-days jobs
 mixed HDD/SSD/NVMe
-multiple volumes
+multiple/removable volumes
 ```
 
-Do not introduce algorithms that require all paths, extracted text, OCR, or embeddings in memory at once.
+Do not introduce algorithms that require all paths, extracted text, OCR, embeddings, or plans in memory at once.
 
-Use streaming/paging, bounded queues, durable tasks, incremental caches, and per-device resource controls.
+Use streaming/paging, bounded queues/backpressure, durable tasks, incremental caches, and per-device resource controls.
 
 ### Long work must be durable
 
 A future long job must survive process crash/reboot and support true checkpoint-based pause/resume. Do not misuse the word `resumable` for a process that merely starts another scan and reuses some existing rows.
 
 Durable job/checkpoint state belongs in organizer-owned storage, not only in worker memory.
+
+Closing a terminal must not be allowed to destroy hours of completed durable work once the job engine exists.
 
 ### Interpret requirements before acting
 
@@ -88,11 +110,13 @@ Distinguish:
 - explicit user requirements;
 - CLI flags;
 - policy constraints;
-- stored defaults;
+- profiles/stored defaults;
 - inferred assumptions;
 - unresolved questions.
 
 High-impact ambiguity becomes a targeted question instead of a guess. In non-interactive operation, unresolved high-impact requirements should become `needs_user` or equivalent rather than silently choosing an answer.
+
+Related questions should be batched where practical; unrelated work may continue while only affected tasks wait.
 
 ### Understand before mutating
 
@@ -105,8 +129,9 @@ locate
 → understand/search
 → relate
 → plan
+→ validate/simulate
 → questions/review
-→ validate/apply
+→ apply
 → audit/undo
 ```
 
@@ -114,11 +139,29 @@ Discovery, extraction, OCR, classification, search indexing, relationship detect
 
 Model output is never authorization to mutate files.
 
+## Truth/state boundaries
+
+Do not collapse these concepts:
+
+```text
+physical observation
+policy/in-scope state
+deterministic derived data
+probabilistic/inferred data
+user intent/answers
+plan state
+audit/applied state
+```
+
+A provider outage, inaccessible root, policy exclusion, failed worker, or uncertain model must not silently rewrite physical truth.
+
+Observation epochs/snapshots and provider reconciliation should eventually replace simplistic “seen/not seen” assumptions at scale.
+
 ## Delegate mature primitives
 
 Do not automatically rebuild solved low-level infrastructure.
 
-Before writing a new scanner, metadata parser, OCR stack, duplicate engine, full-text engine, vector store, CLI parser, archive parser, or other generic primitive, check:
+Before writing a new scanner, metadata parser, OCR stack, duplicate engine, full-text engine, vector store, CLI parser, archive parser, source-code parser, or other generic primitive, check:
 
 1. upstream implementation;
 2. `PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`;
@@ -133,10 +176,13 @@ MediaInfo              media metadata (already upstream)
 libarchive             archive inventory
 OCRmyPDF               searchable-PDF orchestration
 PaddleOCR              Arabic/Urdu/English OCR benchmark candidate
-Tantivy                full-text search candidate
+Tantivy / FTS5         full-text search candidates
 USearch                 vector-search candidate
 BLAKE3                  fast content fingerprints
 CLI11                   expanding CLI parser candidate
+Tree-sitter             source-code structure candidate
+Git/libgit2 adapter     repository metadata candidate
+ICU                     multilingual normalization/tokenization candidate
 ```
 
 External tools are **workers/providers**, not authorities over user intent, canonical state, planning, or mutation.
@@ -161,6 +207,24 @@ Provider outage/journal gaps/inaccessible volumes must never be interpreted as d
 
 Canonical physical observation, policy state, job state, questions and plans remain organizer-owned.
 
+## File/volume identity rules
+
+Paths are not sufficient identity for all serious workflows.
+
+Where supported, consider volume identity, platform file ID, hardlink identity, normalized path key, size/timestamps, and staged content fingerprints.
+
+Windows edge cases requiring deliberate semantics/tests include:
+
+- Unicode and long paths;
+- case-only path collisions;
+- hardlinks;
+- reparse/junction/mount points;
+- sparse/compressed/encrypted files;
+- removable/offline volumes;
+- cloud placeholders.
+
+Ordinary inventory should avoid accidentally hydrating cloud-placeholder files unless policy explicitly allows the I/O cost.
+
 ## Personal organization rules
 
 Long-term behavior includes:
@@ -171,6 +235,7 @@ Long-term behavior includes:
 - do not invent missing bibliographic metadata;
 - project-owned files remain with their project when ownership is more meaningful than file type;
 - uncertain items may remain in Inbox/review;
+- exact duplicates, derivatives, editions, translations, and related files remain distinct claims;
 - duplicate workflows prove/report before destructive action;
 - archive is preferred over destructive cleanup during early versions.
 
@@ -212,9 +277,11 @@ Canonical state can include jobs/tasks/checkpoints, provider cursors, physical o
 
 Large derived indexes may use specialized rebuildable storage such as Tantivy/FTS5 or USearch. Do not move canonical state into a derived search index.
 
+Large derived OCR/text/chunk/thumbnail data may use a content cache rather than bloating control tables.
+
 Do not add RocksDB or another database simply because it sounds more scalable; require measurements and a migration/operational justification.
 
-## Resource scheduling
+## Resource scheduling and budgets
 
 Large-drive work must distinguish resource classes:
 
@@ -226,9 +293,24 @@ CPU extraction
 GPU OCR
 CPU/GPU LLM
 network/cloud
+search-index writes
 ```
 
 Do not saturate HDDs with NVMe-style random concurrency. Prefer per-device limits and user-visible controls.
+
+Before expensive jobs, expose estimates where reasonably knowable and support explicit future budgets for read volume, OCR pages, runtime, cache growth, and cloud cost/tokens.
+
+When a hard budget is exhausted, checkpoint cleanly rather than silently exceeding it.
+
+## Plans and explainability
+
+Important inferred facts/relations/plans should retain evidence/provenance sufficient for `why`/explain workflows.
+
+Plans should be versioned artifacts tied to source state, JobSpec, policy/config identity, answers, workers/models, evidence, and unresolved assumptions.
+
+Before apply, use deterministic validation plus virtual-filesystem simulation for collisions, invalid/path-length/case issues, protected structures, changed sources, available space, circular moves, and cross-volume semantics.
+
+Apply must not silently regenerate an already approved plan using fresh model output.
 
 ## Upstream compatibility
 
@@ -259,6 +341,9 @@ Current important issues:
 #3 CLI-first/offline-first/multi-terabyte architecture
 #4 EverythingProvider
 #5 dependency/delegation strategy
+#6 durable daemon/job/checkpoint/resource runtime
+#7 intent/questions/policy/explainability
+#8 8TB snapshots/reconciliation/benchmarks/fault injection
 ```
 
 Use the roadmap for sequencing and draft PRs for incomplete implementation.
@@ -274,6 +359,7 @@ feat(indexer): ...
 fix(indexer): ...
 feat(provider): ...
 feat(job-engine): ...
+feat(policy): ...
 test(indexer): ...
 docs(personal-organizer): ...
 ci(personal-organizer): ...
@@ -306,13 +392,19 @@ Testing layers include:
 - crash/restart/checkpoint resume tests;
 - policy-change tests;
 - Arabic/Urdu extraction/OCR/search fixtures;
-- multi-million-entry synthetic benchmarks;
+- 1M/10M synthetic-entry benchmarks;
+- bounded-memory verification;
 - long soak tests;
-- worker timeout/crash tests;
+- worker timeout/crash/malformed-output tests;
+- drive disconnect/reconnect tests;
+- provider journal-gap/reset reconciliation tests;
+- hardlink/cloud-placeholder/long-path fixtures;
 - real native Windows production build/launcher smoke tests;
 - before/after source hashes for read-only phases.
 
 Focused mini-binary CI is not a substitute for testing the real packaged executable where the integration boundary matters.
+
+Performance regressions should eventually have documented thresholds rather than subjective “feels fast” acceptance.
 
 ## CLI machine contracts
 
@@ -322,23 +414,28 @@ Interactive progress/ANSI output must not corrupt JSON/JSONL or piped output.
 
 CLI ergonomics are product work, not cosmetic extras.
 
+Human explicit commands, guided interactive flows, and natural-language intent must resolve into the same typed core behavior rather than three separate implementations.
+
 ## Current priorities
 
-Check Issues #2/#3/#4/#5 and Draft PR #1 for live status. Current broad order is:
+Check Issues #2–#8 and Draft PR #1 for live status. Current broad order is:
 
-1. finish Phase 1 production Windows build/launcher smoke gate;
+1. finish Phase 1 native Windows build/packaged-launcher/no-mutation smoke gate;
 2. controlled copied real-folder validation;
 3. merge PR #1 only when safe;
-4. introduce filesystem provider abstraction;
-5. build durable job engine / true pause-resume;
-6. implement and benchmark EverythingProvider;
-7. add million-entry scale/soak benchmarks;
+4. introduce filesystem provider abstraction and Everything acceleration;
+5. build durable job runtime / true pause-resume / resource scheduler;
+6. add observation snapshots/reconciliation and million-entry/fault testing;
+7. build typed intent/question/policy engine;
 8. worker/plugin protocol + deterministic extraction;
-9. content cache/fingerprints;
-10. OCR/search/model routing;
-11. requirement/question engine, policy, relationships, planner;
-12. apply/audit, GUI client, and agent integrations.
+9. content identity/cache/fingerprints;
+10. Arabic/Urdu OCR + full-text search + semantic search;
+11. offline/online model routing and task-specific model benchmarks;
+12. relationships/lineage/bibliography/duplicates;
+13. planner + simulation + review;
+14. validated apply/audit/undo;
+15. continuous operation, GUI client, and agent integrations.
 
 ## Final rule
 
-The organizer should earn authority over the filesystem through explicit requirements, durable state, provenance, questions, evidence, tests, reviewability, and reversibility. Convenience must not come from hiding uncertainty or weakening safety boundaries.
+The organizer should earn authority over the filesystem through explicit requirements, durable state, provenance, questions, evidence, tests, simulation, reviewability, and reversibility. Convenience must not come from hiding uncertainty, wasting terabytes of I/O, or weakening safety boundaries.
