@@ -105,10 +105,11 @@ int main() {
     write_file(root / "ordinary" / "notes.md", "notes\n");
     write_file(root / "ExcludedStuff" / "ignore.txt", "ignore me\n");
 
-    // A recognized Node.js project must be indexed as one protected unit in the
-    // current conservative Phase 1 project mode.
+    // A recognized Node.js project is marked as protected metadata while its
+    // useful source files remain visible to the read-only index by default.
     write_file(root / "TaskApp" / "package.json", "{\"name\":\"task-app\"}\n");
     write_file(root / "TaskApp" / "src" / "main.js", "console.log('ok');\n");
+    write_file(root / "TaskApp" / "node_modules" / "pkg" / "index.js", "generated\n");
 
     PersonalFileIndex index(config.string());
     if (!index.is_open()) {
@@ -125,14 +126,15 @@ int main() {
     if (!first.completed) {
         fail("Initial scan did not complete");
     }
-    if (first.files_indexed != 2) {
-        fail("Expected 2 normal files, got " + std::to_string(first.files_indexed));
+    if (first.files_indexed != 4) {
+        fail("Expected 4 useful files including project sources, got " +
+             std::to_string(first.files_indexed));
     }
     if (first.protected_projects_indexed != 1) {
         fail("Expected exactly 1 protected project");
     }
-    if (first.directories_indexed < 2) {
-        fail("Expected root and ordinary directory to be indexed");
+    if (first.directories_indexed < 3) {
+        fail("Expected normal directories and project source directories to be indexed");
     }
 
     if (!fs::exists(root / "document.txt") ||
@@ -148,15 +150,18 @@ int main() {
     const std::string root_utf8 = root.string();
     const std::string doc_path = (root / "document.txt").string();
     const std::string project_path = (root / "TaskApp").string();
+    const std::string project_source_path = (root / "TaskApp" / "src" / "main.js").string();
+    const std::string generated_project_path =
+        (root / "TaskApp" / "node_modules" / "pkg" / "index.js").string();
     const std::string excluded_path = (root / "ExcludedStuff" / "ignore.txt").string();
 
     const auto present_count = scalar_int64(
         db,
         "SELECT COUNT(*) FROM personal_index_entries WHERE is_present=1 AND scan_root=" +
             quote_sql(root_utf8) + ";");
-    if (present_count != 5) {
+    if (present_count != 8) {
         sqlite3_close(db);
-        fail("Expected 5 present index rows after first scan, got " +
+        fail("Expected 8 present index rows after first scan, got " +
              std::to_string(present_count));
     }
 
@@ -176,6 +181,24 @@ int main() {
     if (project_rule != "node") {
         sqlite3_close(db);
         fail("Expected Node.js project detection, got: " + project_rule);
+    }
+
+    const auto project_source_count = scalar_int64(
+        db,
+        "SELECT COUNT(*) FROM personal_index_entries WHERE full_path=" +
+            quote_sql(project_source_path) + " AND is_present=1;");
+    if (project_source_count != 1) {
+        sqlite3_close(db);
+        fail("Useful source file inside protected project was not indexed");
+    }
+
+    const auto generated_project_count = scalar_int64(
+        db,
+        "SELECT COUNT(*) FROM personal_index_entries WHERE full_path=" +
+            quote_sql(generated_project_path) + ";");
+    if (generated_project_count != 0) {
+        sqlite3_close(db);
+        fail("node_modules should remain excluded from project indexing");
     }
 
     const std::string hash = scalar_text(
