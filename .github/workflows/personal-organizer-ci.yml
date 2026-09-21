@@ -75,6 +75,7 @@ jobs:
             mingw-w64-ucrt-x86_64-qt6-base
             mingw-w64-ucrt-x86_64-sqlite3
             mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-pkgconf
 
       - name: Run Windows personal file index integration test
         shell: msys2 {0}
