@@ -1,13 +1,6 @@
 name: Personal Organizer Windows Production Gate
 
 on:
-  push:
-    branches:
-      - feature/indexer
-    paths:
-      - 'app/**'
-      - 'external/**'
-      - '.github/workflows/personal-organizer-windows-production.yml'
   pull_request:
     branches:
       - personal-organizer
@@ -21,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: personal-organizer-windows-production-${{ github.ref }}
+  group: personal-organizer-windows-production-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -71,10 +64,19 @@ jobs:
           restore-keys: |
             windows-vcpkg-
 
-      - name: Build vendored libzip
+      - name: Build vendored libzip in application dependency environment
         shell: pwsh
         run: |
+          $repoRoot = (Get-Location).Path
+          $toolchain = Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'
+          $manifest = Join-Path $repoRoot 'app'
+          $installed = Join-Path $repoRoot 'app\build-windows-vcpkg_installed'
+
           cmake -S external\libzip -B external\libzip\build -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_MANIFEST_DIR="$manifest" `
+            -DVCPKG_INSTALLED_DIR="$installed" `
             -DBUILD_SHARED_LIBS=OFF `
             -DBUILD_DOC=OFF `
             -DENABLE_BZIP2=OFF `
@@ -228,7 +230,6 @@ jobs:
           import json
           import os
           import sqlite3
-          import sys
 
           db = os.environ['AIFS_INDEX_DB']
           expected_names = {
@@ -242,7 +243,7 @@ jobs:
           try:
               rows = con.execute(
                   "SELECT name, full_path, observation_state, policy_state "
-                  "FROM personal_index_entries WHERE entry_type='file'"
+                  "FROM personal_index_entries"
               ).fetchall()
               found_names = {row[0] for row in rows}
               missing = sorted(expected_names - found_names)
