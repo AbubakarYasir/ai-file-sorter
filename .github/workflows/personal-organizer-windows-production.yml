@@ -1,0 +1,318 @@
+name: Personal Organizer Windows Production Gate
+
+on:
+  push:
+    branches:
+      - feature/indexer
+    paths:
+      - 'app/**'
+      - 'external/**'
+      - '.github/workflows/personal-organizer-windows-production.yml'
+  pull_request:
+    branches:
+      - personal-organizer
+    paths:
+      - 'app/**'
+      - 'external/**'
+      - '.github/workflows/personal-organizer-windows-production.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-organizer-windows-production-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-windows-production:
+    name: Native Windows build + packaged index smoke test
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve vcpkg root
+        shell: pwsh
+        run: |
+          $candidates = @(
+            $env:VCPKG_INSTALLATION_ROOT,
+            $env:VCPKG_ROOT,
+            'C:\vcpkg'
+          ) | Where-Object { $_ }
+
+          $root = $candidates |
+            Where-Object { Test-Path (Join-Path $_ 'scripts\buildsystems\vcpkg.cmake') } |
+            Select-Object -First 1
+
+          if (-not $root) {
+            $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git $root
+            & (Join-Path $root 'bootstrap-vcpkg.bat') -disableMetrics
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Failed to bootstrap vcpkg.'
+            }
+          }
+
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using vcpkg root: $root"
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\vcpkg\archives
+            app\build-windows-vcpkg_installed
+          key: windows-vcpkg-${{ hashFiles('app/vcpkg.json', 'app/vcpkg-configuration.json') }}
+          restore-keys: |
+            windows-vcpkg-
+
+      - name: Build vendored libzip
+        shell: pwsh
+        run: |
+          cmake -S external\libzip -B external\libzip\build -A x64 `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DBUILD_DOC=OFF `
+            -DENABLE_BZIP2=OFF `
+            -DENABLE_LZMA=OFF `
+            -DENABLE_ZSTD=OFF `
+            -DENABLE_OPENSSL=OFF `
+            -DENABLE_GNUTLS=OFF `
+            -DENABLE_MBEDTLS=OFF `
+            -DENABLE_COMMONCRYPTO=OFF `
+            -DENABLE_WINDOWS_CRYPTO=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'libzip configure failed.' }
+
+          cmake --build external\libzip\build --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'libzip build failed.' }
+
+      - name: Build native production application
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\app\build_windows.ps1 `
+            -Configuration Release `
+            -Variants Standard `
+            -VcpkgRoot $env:VCPKG_ROOT `
+            -Parallel 4
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows application build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Locate packaged launcher
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'app\build-windows\Release\aifilesorter.exe',
+            'app\build-windows\aifilesorter.exe',
+            'app\bin\Release\aifilesorter.exe',
+            'app\bin\aifilesorter.exe'
+          )
+
+          $launcher = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $launcher) {
+            throw "Packaged launcher not found. Checked: $($candidates -join ', ')"
+          }
+
+          $launcher = (Resolve-Path $launcher).Path
+          $bin = Join-Path (Split-Path -Parent $launcher) 'aifilesorter-bin.exe'
+          if (-not (Test-Path $bin)) {
+            throw "Expected aifilesorter-bin.exe beside launcher: $bin"
+          }
+
+          "AIFS_LAUNCHER=$launcher" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AIFS_OUTPUT_DIR=$(Split-Path -Parent $launcher)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Launcher: $launcher"
+          Write-Host "Main binary: $bin"
+
+      - name: Create Unicode fixture and baseline hashes
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'فهرسة-اختبار-اردو'
+          $stateRoot = Join-Path $env:RUNNER_TEMP 'aifs-isolated-state'
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'aifs-smoke-artifacts'
+
+          New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $fixture 'كتب') | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $fixture 'نوٹس') | Out-Null
+          New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+
+          Set-Content -LiteralPath (Join-Path $fixture 'كتب\الإمام النووي.txt') `
+            -Value 'اختبار فهرسة نص عربي على ويندوز' -Encoding utf8NoBOM
+          Set-Content -LiteralPath (Join-Path $fixture 'نوٹس\تحقیق اردو.txt') `
+            -Value 'یہ ایک اردو فائل ہے جو یونیکوڈ راستے کی جانچ کرتی ہے۔' -Encoding utf8NoBOM
+          Set-Content -LiteralPath (Join-Path $fixture 'mixed-English-عربي.md') `
+            -Value '# Mixed fixture`nEnglish + العربية + اردو' -Encoding utf8NoBOM
+          [IO.File]::WriteAllBytes((Join-Path $fixture 'نمونہ.bin'), [byte[]](0..255))
+
+          function Get-FixtureHashSnapshot([string]$Root) {
+            @(Get-ChildItem -LiteralPath $Root -Recurse -File | Sort-Object FullName | ForEach-Object {
+              [pscustomobject]@{
+                path = [IO.Path]::GetRelativePath($Root, $_.FullName)
+                length = $_.Length
+                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              }
+            })
+          }
+
+          $before = Get-FixtureHashSnapshot $fixture
+          $before | ConvertTo-Json -Depth 4 | Set-Content `
+            -LiteralPath (Join-Path $artifactRoot 'source-before.json') -Encoding utf8NoBOM
+
+          "AIFS_FIXTURE=$fixture" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AIFS_STATE_ROOT=$stateRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AIFS_SMOKE_ARTIFACTS=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run packaged launcher against Unicode root
+        shell: pwsh
+        run: |
+          $env:APPDATA = Join-Path $env:AIFS_STATE_ROOT 'Roaming'
+          $env:LOCALAPPDATA = Join-Path $env:AIFS_STATE_ROOT 'Local'
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+
+          $stderrPath = Join-Path $env:AIFS_SMOKE_ARTIFACTS 'launcher-stderr.txt'
+          Push-Location $env:AIFS_OUTPUT_DIR
+          try {
+            $stdoutLines = & $env:AIFS_LAUNCHER index $env:AIFS_FIXTURE --json 2>$stderrPath
+            $exitCode = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+
+          $stdout = ($stdoutLines -join "`n").Trim()
+          $stdout | Set-Content -LiteralPath (Join-Path $env:AIFS_SMOKE_ARTIFACTS 'launcher-stdout.json') -Encoding utf8NoBOM
+
+          if ($exitCode -ne 0) {
+            Write-Host 'Launcher stdout:'
+            Write-Host $stdout
+            Write-Host 'Launcher stderr:'
+            if (Test-Path $stderrPath) { Get-Content -LiteralPath $stderrPath }
+            throw "Packaged launcher index command failed with exit code $exitCode."
+          }
+
+          if (-not $stdout) { throw 'Packaged launcher produced empty stdout.' }
+
+          try {
+            $result = $stdout | ConvertFrom-Json
+          } catch {
+            Write-Host "Raw stdout: $stdout"
+            throw 'Packaged launcher stdout was not valid JSON.'
+          }
+
+          if ($result.kind -ne 'aifs.personalIndexResult') {
+            throw "Unexpected result kind: $($result.kind)"
+          }
+          if ($result.status -ne 'completed') {
+            throw "Unexpected index status: $($result.status)"
+          }
+          if ([int]$result.filesIndexed -lt 4) {
+            throw "Expected at least 4 files to be indexed; got $($result.filesIndexed)."
+          }
+          if (-not $result.database -or -not (Test-Path -LiteralPath $result.database)) {
+            throw "Index database does not exist: $($result.database)"
+          }
+
+          "AIFS_INDEX_DB=$($result.database)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Copy-Item -LiteralPath $result.database -Destination (Join-Path $env:AIFS_SMOKE_ARTIFACTS 'personal_file_index.db') -Force
+
+      - name: Verify SQLite state and Unicode paths
+        shell: pwsh
+        run: |
+          $script = @'
+          import json
+          import os
+          import sqlite3
+          import sys
+
+          db = os.environ['AIFS_INDEX_DB']
+          expected_names = {
+              'الإمام النووي.txt',
+              'تحقیق اردو.txt',
+              'mixed-English-عربي.md',
+              'نمونہ.bin',
+          }
+
+          con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+          try:
+              rows = con.execute(
+                  "SELECT name, full_path, observation_state, policy_state "
+                  "FROM personal_index_entries WHERE entry_type='file'"
+              ).fetchall()
+              found_names = {row[0] for row in rows}
+              missing = sorted(expected_names - found_names)
+              if missing:
+                  raise SystemExit(f'Missing Unicode fixture rows: {missing!r}')
+
+              bad_observation = [row for row in rows if row[0] in expected_names and row[2] != 'present']
+              if bad_observation:
+                  raise SystemExit(f'Fixture rows not present: {bad_observation!r}')
+
+              run = con.execute(
+                  'SELECT status, errors FROM personal_index_scan_runs ORDER BY id DESC LIMIT 1'
+              ).fetchone()
+              if not run or run[0] != 'completed' or run[1] != 0:
+                  raise SystemExit(f'Unexpected latest scan run: {run!r}')
+
+              report = {
+                  'database': db,
+                  'fixture_files_found': sorted(expected_names),
+                  'latest_run': {'status': run[0], 'errors': run[1]},
+                  'rows_examined': len(rows),
+              }
+              artifact_root = os.environ['AIFS_SMOKE_ARTIFACTS']
+              with open(os.path.join(artifact_root, 'sqlite-verification.json'), 'w', encoding='utf-8') as f:
+                  json.dump(report, f, ensure_ascii=False, indent=2)
+          finally:
+              con.close()
+          '@
+
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'verify-personal-index.py'
+          Set-Content -LiteralPath $scriptPath -Value $script -Encoding utf8NoBOM
+          python $scriptPath
+          if ($LASTEXITCODE -ne 0) { throw 'SQLite verification failed.' }
+
+      - name: Prove source fixture was not mutated
+        shell: pwsh
+        run: |
+          function Get-FixtureHashSnapshot([string]$Root) {
+            @(Get-ChildItem -LiteralPath $Root -Recurse -File | Sort-Object FullName | ForEach-Object {
+              [pscustomobject]@{
+                path = [IO.Path]::GetRelativePath($Root, $_.FullName)
+                length = $_.Length
+                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              }
+            })
+          }
+
+          $beforePath = Join-Path $env:AIFS_SMOKE_ARTIFACTS 'source-before.json'
+          $afterPath = Join-Path $env:AIFS_SMOKE_ARTIFACTS 'source-after.json'
+          $before = Get-Content -LiteralPath $beforePath -Raw | ConvertFrom-Json
+          $after = Get-FixtureHashSnapshot $env:AIFS_FIXTURE
+          $after | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $afterPath -Encoding utf8NoBOM
+
+          $beforeCanonical = $before | ConvertTo-Json -Depth 4 -Compress
+          $afterCanonical = $after | ConvertTo-Json -Depth 4 -Compress
+          if ($beforeCanonical -ne $afterCanonical) {
+            Write-Host 'Before:'
+            Write-Host $beforeCanonical
+            Write-Host 'After:'
+            Write-Host $afterCanonical
+            throw 'Read-only index smoke test changed fixture file paths, sizes, or hashes.'
+          }
+
+          Write-Host "Source mutation check passed for $($after.Count) files."
+
+      - name: Upload synthetic smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-organizer-windows-production-smoke
+          path: ${{ runner.temp }}\aifs-smoke-artifacts
+          if-no-files-found: warn
+          retention-days: 14
