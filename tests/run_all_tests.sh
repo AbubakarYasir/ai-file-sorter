@@ -8,6 +8,7 @@ declare -a TEST_SCRIPTS=(
     "$ROOT_DIR/tests/run_translation_tests.sh"
     "$ROOT_DIR/tests/run_personal_index_tests.sh"
     "$ROOT_DIR/tests/run_personal_index_query_tests.sh"
+    "$ROOT_DIR/tests/run_personal_index_command_tests.sh"
 )
 
 echo "Running AI File Sorter test suite"
