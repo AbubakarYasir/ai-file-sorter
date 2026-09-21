@@ -16,10 +16,19 @@ struct PersonalFileIndexOptions {
     bool follow_reparse_points{false};
 
     /**
-     * Treat recognized software/project roots as single protected entries instead
-     * of traversing and indexing their internal files.
+     * Detect recognized software/project roots and mark them as protected project
+     * entries. This protection is metadata for later organization/planning and
+     * does not by itself require hiding project contents from the read-only index.
      */
     bool protect_project_directories{true};
+
+    /**
+     * Continue read-only traversal inside recognized protected projects.
+     * Enabled by default so repositories remain searchable while generated
+     * internals such as .git/node_modules stay excluded by normal scan rules.
+     * Disable for the older conservative "protected root only" behavior.
+     */
+    bool index_protected_project_contents{true};
 
     /**
      * Compute SHA-256 for regular files while scanning.
