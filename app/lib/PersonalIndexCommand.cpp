@@ -236,8 +236,10 @@ PersonalIndexCommand::ParseResult PersonalIndexCommand::parse(int argc, char** a
             continue;
         }
         if (argument == "--follow-reparse-points") {
-            result.options.scan_options.follow_reparse_points = true;
-            continue;
+            result.error =
+                "--follow-reparse-points is disabled in Phase 1 until cycle detection, "
+                "root-boundary enforcement, and directory-identity tracking are implemented.";
+            break;
         }
         if (argument == "--project-root-only") {
             result.options.scan_options.index_protected_project_contents = false;
@@ -374,10 +376,10 @@ std::string PersonalIndexCommand::usage_text()
         "  --json                     Emit machine-readable JSON.\n"
         "  --hash <off|all>           SHA-256 policy (default: off).\n"
         "  --include-hidden           Include hidden filesystem entries.\n"
-        "  --follow-reparse-points    Follow symlinks/reparse points (advanced).\n"
         "  --project-root-only        Mark protected projects without indexing contents.\n"
         "  --no-project-protection    Disable project protection metadata/detection.\n"
         "  --help, -h                 Show this help.\n\n"
+        "Reparse-point/symlink following is intentionally disabled in Phase 1.\n"
         "The index command does not move, rename, delete, or edit scanned source files.\n";
 }
 
