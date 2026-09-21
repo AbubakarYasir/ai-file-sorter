@@ -1,337 +1,371 @@
-# Personal AI File Organizer — Development Roadmap
+# Personal AI File Organizer — Roadmap
 
-This project builds on `hyperfield/ai-file-sorter` rather than replacing it.
+This is the working roadmap for my personal fork of `hyperfield/ai-file-sorter`.
 
-## Goal
+I am building a local-first system that can understand, index, search, relate, and safely reorganize a large mixed filesystem without treating files as anonymous blobs. The roadmap is intentionally staged: I want the application to become trustworthy at understanding my files before I give it broader authority to change them.
 
-Turn AI File Sorter into a personal, whole-PC organization system that can:
+## What I want the finished system to do
+
+The organizer should eventually be able to:
 
 - understand file contents instead of relying on filenames alone;
-- preserve software/project structures that must not be broken;
-- understand Arabic and Islamic-study material;
-- identify scanned PDFs through OCR;
-- use a stable personal taxonomy instead of inventing folders every run;
-- learn from corrections;
-- detect duplicates and related files;
-- generate a complete reviewable plan before changing the filesystem;
-- keep every applied change reversible where possible.
+- index selected folders or whole drives incrementally;
+- search across local files using both metadata and extracted content;
+- understand normal PDFs and detect image-only/scanned PDFs;
+- OCR Arabic, Urdu, English, and mixed documents;
+- preserve real bibliographic information for books and papers;
+- preserve software repositories, design projects, and other structure-sensitive folders;
+- detect files that belong together before proposing moves;
+- use one stable personal taxonomy and naming system;
+- learn from accepted/rejected organization decisions;
+- detect exact duplicates and later near-duplicates;
+- generate a complete plan before filesystem mutation;
+- expose every important proposal through review;
+- maintain an audit trail and undo path where technically possible;
+- provide a friendly GUI and a more powerful CLI/headless interface;
+- support future agents/automation through machine-readable contracts.
 
-## Repository Strategy
-
-- `upstream` = `https://github.com/hyperfield/ai-file-sorter.git`
-- `origin` = personal fork on GitHub
-- `main` = keep close to upstream
-- `personal-organizer` = integration branch for our custom system
-- feature work = separate branches merged into `personal-organizer`
-
-Suggested feature branches:
-
-- `feature/indexer`
-- `feature/arabic-ocr`
-- `feature/personal-taxonomy`
-- `feature/organize-policy`
-- `feature/relationship-engine`
-- `feature/duplicate-detection`
-- `feature/bibliographic-detection`
-- `feature/review-plan`
-
-## Design Principles
-
-1. Never let the AI freely restructure the whole PC without a review stage.
-2. Analysis and planning should be read-only by default.
-3. Keep personal logic modular so upstream updates remain easy to merge.
-4. Prefer configuration/policy files over hard-coding personal rules in C++.
-5. Never break recognized software, Git, design, or project folder structures.
-6. Uncertain items should go to review, not be force-classified.
-7. Preserve original extensions and useful metadata.
-8. Keep Arabic titles in Arabic where appropriate.
-9. Treat extracted text, filenames, and document contents as untrusted input.
-10. Maintain an audit trail of proposed and applied changes.
-
----
-
-# Phase 0 — Safe Development Foundation
-
-## Objectives
-
-- Fork upstream.
-- Clone the fork locally.
-- Add upstream remote.
-- Create the `personal-organizer` branch.
-- Keep `main` suitable for syncing with Hyperfield.
-- Document how upstream updates are imported.
-
-## Done when
+## Repository and branch strategy
 
 ```text
 upstream/main
     ↓
-personal fork/main
+origin/main
     ↓
 personal-organizer
     ↓
 feature/*
 ```
 
-works cleanly.
+- `upstream` points to `hyperfield/ai-file-sorter`.
+- `origin` points to `AbubakarYasir/ai-file-sorter`.
+- `main` should remain close to upstream.
+- `personal-organizer` is my stable integration branch.
+- feature work is isolated in `feature/*` branches and reviewed before integration.
+
+Current development branch: `feature/indexer`.
+
+Current tracking issue: [#2](../../issues/2).
+
+Current draft PR: [#1](../../pull/1).
+
+## Non-negotiable engineering rules
+
+1. Indexing and analysis are read-only with respect to source files.
+2. The application must not silently reorganize an entire machine.
+3. A plan is generated before mutations are applied.
+4. Low confidence means review, not aggressive guessing.
+5. Project structure is preserved unless a specific workflow explicitly understands how to transform it safely.
+6. Personal behavior and taxonomy belong in policy/configuration where possible instead of being hard-coded throughout C++.
+7. The GUI and CLI use shared core services.
+8. The CLI may expose more controls than the GUI, but not bypass operating-system security.
+9. Extracted document text and filenames are untrusted input; they must never become hidden instructions to the application or an LLM.
+10. Applied changes must be logged with enough information to explain and, where possible, undo them.
+11. Planned commands/features must never be documented as implemented.
+12. Every significant code change includes documentation and tests appropriate to its risk.
 
 ---
 
-# Phase 1 — Whole-PC Read-Only Index
+## Phase 0 — Safe development foundation
 
-Create a persistent index without moving anything.
+**Status: substantially complete.**
 
-## Index
+Purpose: make long-term customization possible without losing the ability to follow upstream.
 
-- full path
-- filename
-- extension
-- file size
-- timestamps
-- stable file identity where possible
-- MIME/file type
-- SHA-256 hash
-- existing directory context
-- document text availability
-- extracted summary
-- image description
-- media metadata
-- project membership
-- confidence/status
+Completed foundation:
 
-## Requirements
+- personal GitHub fork created;
+- local clone created;
+- `origin` points to my fork;
+- `upstream` points to Hyperfield;
+- `main` reserved as upstream-friendly;
+- `personal-organizer` created as the integration branch;
+- feature-branch workflow established;
+- fork-specific roadmap and documentation established;
+- fork-specific CI introduced.
 
-- resumable scans;
-- exclusions for system/application/cache folders;
-- configurable roots;
-- incremental re-indexing;
-- no mutation during indexing.
+Ongoing rule: upstream-heavy files should be changed only when necessary; new fork features should prefer modular services.
 
 ---
 
-# Phase 2 — OCR for Scanned PDFs
+## Phase 1 — Persistent read-only filesystem index
 
-AI File Sorter already reads PDF text layers. Add OCR for image-only PDFs.
+**Status: in progress.**
 
-## Pipeline
+Tracking: [Issue #2](../../issues/2), [Draft PR #1](../../pull/1).
+
+Goal: build a reliable local inventory without moving, renaming, deleting, or editing source files.
+
+### Index data
+
+The persistent index should be able to represent:
+
+- normalized full path;
+- parent path;
+- filename and extension;
+- file/directory/project type;
+- file size;
+- created/modified timestamps where available;
+- scan root;
+- last-seen scan;
+- presence/stale state;
+- optional SHA-256;
+- extraction state;
+- detected MIME/file type;
+- text availability;
+- document summary;
+- content language;
+- image description;
+- project membership/type;
+- per-entry errors/status;
+- later confidence/analysis fields.
+
+### Requirements
+
+- streaming traversal rather than building a whole-drive vector in memory;
+- persistent SQLite storage;
+- resumable/incremental design;
+- multiple configurable scan roots;
+- safe reparse-point/symlink handling;
+- permission errors recorded without aborting an otherwise useful scan;
+- path-aware Windows/system exclusions;
+- protected project recognition;
+- hashing optional by default;
+- statistics/query helpers;
+- machine-readable CLI command;
+- focused integration tests;
+- no source mutation.
+
+### Important design correction
+
+Protected project detection and read-only indexing are separate concerns. A project must be protected from unsafe reorganization, but I may still want its internal files indexed for search and understanding. Phase 1 should make that policy explicit rather than assuming “protected” always means “do not read inside.”
+
+### Exit criteria
+
+I can scan a small controlled folder, inspect the resulting database/statistics, repeat the scan incrementally, and prove that no source file was changed.
+
+A whole `C:\` scan is not an exit test until path-aware exclusions and permission behavior have been validated.
+
+---
+
+## Phase 2 — Content extraction pipeline
+
+Goal: enrich the inventory using existing upstream extraction capabilities before adding expensive AI work.
+
+Planned layers:
+
+```text
+metadata
+→ embedded document text
+→ document structure
+→ language detection
+→ compact summary
+→ content classification
+```
+
+Reuse upstream document extractors for formats already supported instead of duplicating them.
+
+Cache extraction by content identity/timestamps so unchanged files are not repeatedly reprocessed.
+
+---
+
+## Phase 3 — OCR for scanned documents
+
+Goal: understand PDFs/images that do not have a usable text layer.
+
+Priority languages:
+
+- Arabic;
+- Urdu;
+- English;
+- mixed Arabic/English and Urdu/English documents.
+
+Intended pipeline:
 
 ```text
 PDF
-→ detect usable text layer
-→ if insufficient text:
-    render selected pages
+→ measure usable embedded text
+→ if text is insufficient:
+    select strategic pages
+    → render
     → OCR
     → normalize Unicode
     → cache OCR
-→ document summarizer
+→ identify document
+→ summarize/classify
 ```
 
-## Priorities
+Do not OCR every page of every PDF by default. Begin with identification-rich pages such as the cover/title page, publication data, contents, introduction, and representative interior pages. Escalate only when needed.
 
-- Arabic
-- Urdu
-- English
-- mixed Arabic/English pages
-
-## Important
-
-Do not OCR every page blindly. Start with strategic pages such as:
-
-- cover/title page;
-- copyright/publication page;
-- table of contents;
-- introduction;
-- several representative interior pages.
-
-Escalate to more pages only when identification confidence is low.
+OCR engine selection must be benchmarked on real Arabic/Urdu scans before it becomes a dependency.
 
 ---
 
-# Phase 3 — Personal Taxonomy
+## Phase 4 — Stable personal taxonomy
 
-Create one stable taxonomy covering the user's actual life and work.
+Goal: replace one-off AI folder invention with a predictable organization system.
 
-Initial top-level concepts may include:
+The final taxonomy should be informed by the actual filesystem index, but likely domains include:
 
 ```text
-Knowledge
+Inbox
+Knowledge / Library
 Research
 Studies
-Markaz
-Design
-Development
 Projects
+Development
+Design
 Personal
 Resources
 Archive
-Inbox
 ```
 
-The final hierarchy should be derived from the actual filesystem inventory, not assumed in advance.
-
-## Islamic material
-
-Allow Arabic taxonomy labels and preserve Arabic bibliographic titles.
-
-Possible subject branches:
+For religious/Islamic material I want Arabic labels and bibliographic titles where appropriate, for example:
 
 ```text
 القرآن وعلومه
+القراءات
 الحديث وعلومه
 الفقه
 أصول الفقه
 العقيدة
+التفسير وأصوله
 اللغة العربية
 السيرة
 التاريخ والتراجم
+المخطوطات والتحقيق
 ```
 
-These are starting concepts, not a final imposed hierarchy.
+These are starting branches, not permission for the AI to invent an excessively deep hierarchy.
+
+Naming direction:
+
+- Islamic/religious content: Arabic naming where appropriate;
+- other content: consistent English naming;
+- books: real title/author/edition when confidently known;
+- projects: project-owned files remain project-owned;
+- development: technical names/conventions are preserved.
 
 ---
 
-# Phase 4 — ORGANIZE.md Policy System
+## Phase 5 — `ORGANIZE.md` policy engine
 
-Add a repository-independent policy file that explains how a specific filesystem should be organized.
+Goal: make ordinary organization preferences editable without recompiling C++.
 
-Example:
+A policy file should define behavior such as:
 
-```text
-ORGANIZE.md
-```
-
-It should support:
-
-- allowed roots/categories;
-- category-specific subcategories;
-- naming rules;
-- language rules;
-- protected directories;
+- allowed roots and destinations;
+- taxonomy rules;
+- naming/language rules;
+- protected paths;
 - project-specific rules;
-- archive rules;
+- Inbox behavior;
+- archive behavior;
 - research-vs-library distinctions;
-- design asset rules;
+- design/media asset behavior;
 - confidence thresholds;
-- "never move" patterns;
-- "ask/review" patterns.
+- never-move patterns;
+- always-review patterns;
+- duplicate policy.
 
-The application should parse this policy and incorporate it into categorization and rename prompts without requiring C++ recompilation for ordinary preference changes.
+The policy should be inherited/merged by scope where useful, similar in spirit to repository instruction files used by developer tools.
 
 ---
 
-# Phase 5 — Related-File / Collection Detection
+## Phase 6 — Related-file and collection detection
 
-Files should not be treated as isolated objects.
+Goal: reason about groups before individual files.
 
-Detect relationships such as:
+Examples:
 
-- source book + notes;
-- original document + translation;
-- PSD/AI project + exports;
-- video project + assets;
-- code repository + documentation;
-- book volumes in a set;
+- book + notes + annotations;
+- original + translation;
+- paper + supplementary data;
+- multi-volume books;
+- alternate editions/scans;
 - course lesson + worksheet + notes;
-- research paper + annotations;
-- multiple editions of the same book.
+- PSD/AI source + exports;
+- video project + assets + rendered output;
+- code repository + documentation;
+- source asset + generated derivatives.
 
-Represent these as collections before proposing moves.
+A collection should influence organization and review as one unit where appropriate.
 
 ---
 
-# Phase 6 — Duplicate Detection
+## Phase 7 — Duplicate detection
 
-Add exact duplicate detection first.
-
-## Exact duplicates
-
-Use SHA-256 plus file size.
-
-## Later
-
-Potential near-duplicate detection:
-
-- images;
-- PDFs with different metadata;
-- documents exported to multiple formats;
-- renamed copies;
-- alternate scans/editions.
-
-Never auto-delete duplicates in the first version.
-
-The review should show:
+Start with exact duplicates:
 
 ```text
-KEEP
-DUPLICATE
-WHY THEY MATCH
-LOCATIONS
-SIZE RECOVERABLE
+size grouping
+→ SHA-256
+→ exact duplicate groups
 ```
+
+Early versions must never auto-delete duplicates.
+
+Review should show what matches, where every copy exists, which copy is proposed to keep, and what space could be recovered.
+
+Later work may add near-duplicate detection for images, alternate PDF scans, exported documents, and renamed copies.
 
 ---
 
-# Phase 7 — Bibliographic Detection
+## Phase 8 — Bibliographic intelligence
 
-For books and academic PDFs, extract structured metadata where possible:
+For books and academic/research documents, extract structured data where available:
 
 ```text
 title
-author
-editor / muhaqqiq
+author/editor/muhaqqiq
 publisher
 edition
 volume
-year
+publication year
 language
 subject
+identifiers
 ```
 
-Use:
+Preferred evidence order:
 
-1. existing PDF metadata;
-2. embedded text;
-3. OCR;
-4. filename/path;
-5. LLM inference only where necessary.
+1. trustworthy embedded metadata;
+2. document title/publication pages;
+3. embedded text;
+4. OCR;
+5. existing filename/path context;
+6. model inference only when necessary.
 
-Do not fabricate missing bibliographic details.
-
-For Arabic books, preserve the original Arabic title.
+The system must not fabricate missing bibliographic facts merely to produce a cleaner filename.
 
 ---
 
-# Phase 8 — Global Planning Engine
+## Phase 9 — Global planning engine
 
-Do not perform moves while reasoning about organization.
+Goal: separate reasoning from filesystem mutation.
 
-Generate a plan first.
-
-Example:
+The planner produces a serializable proposal containing, at minimum:
 
 ```json
 {
-  "source": "D:/Downloads/12345.pdf",
-  "detected_title": "نخبة الفكر في مصطلح أهل الأثر",
-  "destination": "D:/Knowledge/Islamic/الحديث وعلومه/مصطلح الحديث/نخبة الفكر في مصطلح أهل الأثر.pdf",
-  "confidence": 0.96,
-  "reasons": [
-    "Arabic title identified from PDF text",
-    "content concerns hadith terminology"
-  ],
-  "warnings": []
+  "source": "...",
+  "destination": "...",
+  "proposedName": "...",
+  "confidence": 0.0,
+  "reasons": [],
+  "warnings": [],
+  "relationships": [],
+  "policyRules": []
 }
 ```
 
-The plan must be exportable and reviewable before application.
+Plans should be exportable, inspectable, editable, and applicable later without rerunning AI analysis unless explicitly requested.
 
 ---
 
-# Phase 9 — Confidence and Review
+## Phase 10 — Confidence and review
 
-Every proposal gets a confidence/status.
-
-Suggested states:
+Every proposed action gets a clear status such as:
 
 ```text
 High confidence
@@ -340,36 +374,83 @@ Insufficient information
 Protected
 Duplicate candidate
 Conflict
+Blocked by policy
 ```
 
-Never interpret low confidence as permission to guess aggressively.
+The GUI should make uncertainty obvious rather than hiding it behind a confident-looking suggestion.
 
 ---
 
-# Phase 10 — Apply + Undo + Audit
+## Phase 11 — Apply, audit, and undo
 
-Reuse and extend AI File Sorter's existing review/apply/undo system.
+Reuse and extend upstream review/apply/undo infrastructure.
 
-Add:
+An applied change should record:
 
 - plan ID;
 - timestamp;
-- original path;
-- destination path;
-- original filename;
-- final filename;
-- reason;
-- hash;
-- status;
-- undo result.
+- original path/name;
+- final path/name;
+- action type;
+- reason/policy basis;
+- hash or identity data where useful;
+- result;
+- undo result;
+- conflicts/manual intervention.
 
-Keep audit data outside folders being reorganized.
+The audit database must live outside the folders being reorganized.
 
 ---
 
-# Phase 11 — Continuous Inbox Organization
+## Phase 12 — GUI for the personal organizer
 
-Once the main filesystem is stable, use AI organization primarily on incoming material:
+The product is GUI-first even though lower-level services and CLI are built first for testing and automation.
+
+Planned GUI areas:
+
+```text
+Overview
+Index
+Search
+Inbox
+Library / Knowledge
+Projects
+Duplicates
+Review
+Rules / Taxonomy
+History / Undo
+Diagnostics
+```
+
+The GUI should display the same plans/status produced by the core services rather than implement separate organization logic.
+
+---
+
+## Phase 13 — Power-user CLI and agent interface
+
+The CLI is intended to become a functional superset of the GUI for advanced work:
+
+- selected-root and whole-drive indexing;
+- include/exclude controls;
+- extraction/OCR jobs;
+- index queries/search;
+- duplicate reports;
+- policy validation;
+- plan generation/export/apply;
+- database diagnostics/maintenance;
+- JSON output;
+- scripting/scheduled tasks;
+- future MCP/agent access.
+
+Dangerous switches must be explicit and must not bypass OS permissions.
+
+---
+
+## Phase 14 — Continuous Inbox organization
+
+Once the existing filesystem is stable, the preferred operating model becomes incremental organization of new incoming files rather than repeatedly redesigning the entire disk.
+
+Typical sources:
 
 ```text
 Downloads
@@ -379,66 +460,54 @@ Phone Imports
 Temporary Exports
 ```
 
-New items should be:
+Flow:
 
 ```text
-detected
-→ analyzed
-→ matched against taxonomy
-→ proposed
-→ reviewed when necessary
-→ filed
+arrive
+→ index
+→ understand
+→ match policy/taxonomy
+→ propose
+→ review if needed
+→ file
 ```
-
-This is safer than repeatedly reorganizing the entire filesystem.
 
 ---
 
-# Upstream Update Workflow
-
-Keep custom work separate from upstream whenever possible.
-
-To check upstream:
+## Upstream update workflow
 
 ```powershell
 git fetch upstream
-```
 
-To update local `main`:
-
-```powershell
 git switch main
 git merge upstream/main
 git push origin main
-```
 
-Then update the custom integration branch:
-
-```powershell
 git switch personal-organizer
 git merge main
 git push origin personal-organizer
 ```
 
-If Git reports a conflict, stop and resolve the conflict before committing.
+Feature branches are then updated from `personal-organizer` or `main` according to the change being developed.
 
----
+If a merge conflicts with fork-specific work, the conflict should be resolved deliberately and documented rather than force-overwritten.
 
-# First Implementation Order
+## Current implementation order
 
-1. Repository/fork foundation
-2. Read-only index
-3. OCR detection + Arabic OCR
-4. `ORGANIZE.md`
-5. Personal taxonomy
-6. Plan export
-7. Relationship detection
-8. Duplicate detection
-9. Bibliographic extraction
-10. Continuous inbox workflow
+1. finish Phase 1 indexer and tests;
+2. expose a safe CLI index command and query/statistics surface;
+3. connect existing document extraction to the index;
+4. benchmark and implement Arabic/Urdu OCR;
+5. implement `ORGANIZE.md` policy;
+6. derive/finalize taxonomy from real indexed files;
+7. relationship detection;
+8. duplicate detection;
+9. bibliographic extraction;
+10. global planning/review;
+11. GUI integration;
+12. continuous Inbox workflow;
+13. agent/MCP integrations.
 
-The first real milestone is not automatic organization.
+The guiding principle remains simple:
 
-It is:
-
-> Scan the selected filesystem, understand as much as possible, and generate a trustworthy read-only organization plan without moving a single file.
+> I want the software to earn more authority over my filesystem by becoming increasingly reliable at understanding it first.
