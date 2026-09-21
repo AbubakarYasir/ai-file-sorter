@@ -74,15 +74,17 @@ int main() {
     exec(db,
         "CREATE TABLE personal_index_entries ("
         "full_path TEXT PRIMARY KEY, entry_type INTEGER NOT NULL, size_bytes INTEGER NOT NULL, "
-        "sha256 TEXT, hash_state TEXT NOT NULL, is_present INTEGER NOT NULL);"
+        "sha256 TEXT, hash_state TEXT NOT NULL, observation_state TEXT NOT NULL, "
+        "policy_state TEXT NOT NULL);"
         "CREATE TABLE personal_index_scan_runs ("
         "id INTEGER PRIMARY KEY, status TEXT NOT NULL, errors INTEGER NOT NULL);"
         "INSERT INTO personal_index_entries VALUES"
-        "('/a.txt',0,100,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','complete',1),"
-        "('/b.pdf',0,250,NULL,'not_requested',1),"
-        "('/folder',1,0,NULL,'not_requested',1),"
-        "('/repo',2,0,NULL,'not_requested',1),"
-        "('/gone.txt',0,999,NULL,'not_requested',0);"
+        "('/a.txt',0,100,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','complete','present','included'),"
+        "('/b.pdf',0,250,NULL,'not_requested','present','included'),"
+        "('/folder',1,0,NULL,'not_requested','present','included'),"
+        "('/repo',2,0,NULL,'not_requested','present','protected'),"
+        "('/gone.txt',0,999,NULL,'not_requested','missing','included'),"
+        "('/hidden/child.txt',0,42,NULL,'not_requested','unknown','hidden');"
         "INSERT INTO personal_index_scan_runs VALUES(4,'completed',0);"
         "INSERT INTO personal_index_scan_runs VALUES(5,'partial',2);");
     sqlite3_close(db);
@@ -97,12 +99,15 @@ int main() {
         fail("Query facade did not return statistics");
     }
 
-    if (stats->total_entries != 5 ||
+    if (stats->total_entries != 6 ||
         stats->present_entries != 4 ||
         stats->present_files != 2 ||
         stats->present_directories != 1 ||
         stats->present_protected_projects != 1 ||
+        stats->missing_entries != 1 ||
         stats->stale_entries != 1 ||
+        stats->unknown_entries != 1 ||
+        stats->policy_skipped_entries != 2 ||
         stats->hashed_files != 1 ||
         stats->present_bytes != 350) {
         fail("Aggregate index statistics were incorrect");
