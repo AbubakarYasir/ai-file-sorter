@@ -40,6 +40,9 @@ jobs:
       - name: Run personal file index integration test
         run: bash tests/run_personal_index_tests.sh
 
+      - name: Run personal index query test
+        run: bash tests/run_personal_index_query_tests.sh
+
       - name: Verify fork documentation is tracked
         run: |
           test -f PERSONAL-ORGANIZER.md
