@@ -983,9 +983,25 @@ QStringList build_forwarded_args(int argc, char* argv[], bool &console_log_flag)
     return forwardedArgs;
 }
 
+bool is_personal_index_invocation(const QStringList& forwardedArgs)
+{
+    for (const QString& argument : forwardedArgs) {
+        if (argument == QStringLiteral("--allow-direct-launch") ||
+            argument == QStringLiteral("--console-log") ||
+            argument == QStringLiteral("--force-direct-run") ||
+            argument == QStringLiteral("--development") ||
+            argument == QStringLiteral("--test")) {
+            continue;
+        }
+        return argument == QStringLiteral("index");
+    }
+    return false;
+}
+
 bool is_headless_invocation(const QStringList& forwardedArgs)
 {
-    return forwardedArgs.contains(QStringLiteral("--headless")) ||
+    return is_personal_index_invocation(forwardedArgs) ||
+           forwardedArgs.contains(QStringLiteral("--headless")) ||
            forwardedArgs.contains(QStringLiteral("--headless-apply")) ||
            forwardedArgs.contains(QStringLiteral("--headless-help"));
 }
@@ -1060,8 +1076,38 @@ int main(int argc, char* argv[]) {
     const UpdaterLiveTestArgs updaterLiveTest = parse_updater_live_test_args(argc, argv);
     bool console_log_flag = false;
     QStringList forwardedArgs = build_forwarded_args(argc, argv, console_log_flag);
+    const bool personalIndexInvocation = is_personal_index_invocation(forwardedArgs);
+    if (personalIndexInvocation && !console_log_flag) {
+        console_log_flag = true;
+        forwardedArgs.append(QStringLiteral("--console-log"));
+    }
     const bool headlessInvocation = is_headless_invocation(forwardedArgs);
     log_observed_arguments(overrides.observedArgs);
+
+    if (console_log_flag) {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+        FILE* f = nullptr;
+        freopen_s(&f, "CONOUT$", "w", stdout);
+        freopen_s(&f, "CONOUT$", "w", stderr);
+        freopen_s(&f, "CONIN$", "r", stdin);
+    }
+
+    const QString mainExecutable = resolveExecutableName(
+        exeDir,
+        QCoreApplication::applicationFilePath());
+
+    // Personal indexing is a metadata-only command. It does not use an LLM or
+    // visual backend, so do not make it depend on CUDA/Vulkan/GGML discovery.
+    if (personalIndexInvocation) {
+        return launch_main_process(mainExecutable,
+                                   forwardedArgs,
+                                   BackendSelection::Cpu,
+                                   QString(),
+                                   updaterLiveTest,
+                                   /*waitForExit=*/true,
+                                   /*showErrors=*/false);
+    }
+
     if (!validate_override_conflict(overrides)) {
         return EXIT_FAILURE;
     }
@@ -1139,17 +1185,6 @@ int main(int argc, char* argv[]) {
                             useVulkan,
                             availability.detectedCudaRuntimeDirectory);
 
-    if (console_log_flag) {
-        AttachConsole(ATTACH_PARENT_PROCESS);
-        FILE* f = nullptr;
-        freopen_s(&f, "CONOUT$", "w", stdout);
-        freopen_s(&f, "CONOUT$", "w", stderr);
-        freopen_s(&f, "CONIN$", "r", stdin);
-    }
-
-    const QString mainExecutable = resolveExecutableName(
-        exeDir,
-        QCoreApplication::applicationFilePath());
     return launch_main_process(mainExecutable,
                                forwardedArgs,
                                selection,
