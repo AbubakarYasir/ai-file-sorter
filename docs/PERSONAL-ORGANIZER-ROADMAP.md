@@ -1,31 +1,64 @@
 # Personal AI File Organizer — Roadmap
 
-This is the working roadmap for my personal fork of `hyperfield/ai-file-sorter`.
+This is the working roadmap for my fork of `hyperfield/ai-file-sorter`.
 
-I am building a local-first system that can understand, index, search, relate, and safely reorganize a large mixed filesystem without treating files as anonymous blobs. The roadmap is intentionally staged: I want the application to become trustworthy at understanding my files before I give it broader authority to change them.
+I am building a **CLI-first, offline-first filesystem intelligence system** that can operate across multi-million-file, 8TB+ storage, run for hours or days without losing progress, understand multilingual content, ask focused questions when requirements are ambiguous, and produce safe explainable organization plans before any mutation.
 
-## What I want the finished system to do
+The GUI remains useful, but it is a secondary client of the same core. The CLI is the canonical human and automation surface.
 
-The organizer should eventually be able to:
+## Finished-system goals
 
-- understand file contents instead of relying on filenames alone;
-- index selected folders or whole drives incrementally;
-- search across local files using both metadata and extracted content;
-- understand normal PDFs and detect image-only/scanned PDFs;
+The finished system should be able to:
+
+- discover enormous Windows filesystems efficiently without repeatedly walking unchanged trees;
+- use voidtools Everything as an optional Windows discovery/change-feed accelerator;
+- fall back to its own native filesystem provider when Everything is absent or unsuitable;
+- survive crashes/reboots through durable jobs/tasks/checkpoints;
+- pause, resume, cancel, inspect, and tail long jobs;
+- interpret natural-language requirements into an explicit inspectable `JobSpec`;
+- distinguish explicit instructions, policy, remembered defaults, and model inference;
+- ask targeted questions rather than guessing when ambiguity materially changes the result;
+- operate fully offline with local extraction/OCR/search/models as the baseline;
+- optionally escalate selected work to configured online LLMs under privacy policy;
+- understand PDFs, Office documents, images, media, archives, source projects, and other common file types;
 - OCR Arabic, Urdu, English, and mixed documents;
-- preserve real bibliographic information for books and papers;
-- preserve software repositories, design projects, and other structure-sensitive folders;
-- detect files that belong together before proposing moves;
-- use one stable personal taxonomy and naming system;
-- learn from accepted/rejected organization decisions;
-- detect exact duplicates and later near-duplicates;
-- generate a complete plan before filesystem mutation;
-- expose every important proposal through review;
-- maintain an audit trail and undo path where technically possible;
-- provide a friendly GUI and a more powerful CLI/headless interface;
-- support future agents/automation through machine-readable contracts.
+- search filenames, metadata, extracted text/OCR, bibliographic fields, and semantic embeddings;
+- preserve authentic bibliographic information with evidence/provenance;
+- recognize projects and structural relationships before organization;
+- detect exact duplicates without rereading terabytes unnecessarily;
+- apply one stable personal taxonomy and naming policy;
+- generate a complete serializable plan before mutation;
+- expose reasoning, confidence, evidence, model/provider provenance, and unresolved questions;
+- validate source identity/state immediately before apply;
+- maintain audit and undo information where technically possible;
+- expose machine-readable JSON/JSONL contracts for scripting and future agents.
 
-## Repository and branch strategy
+## Scale assumptions
+
+Design for:
+
+```text
+8TB+ total storage
+millions to tens of millions of filesystem entries
+multiple volumes/devices
+hours-to-days jobs
+mixed SSD/NVMe/HDD storage
+large Arabic/Urdu PDF libraries
+large project/design/media trees
+```
+
+Non-negotiable consequences:
+
+1. never require all paths or extracted content in RAM;
+2. page/stream provider output;
+3. persist work queues/checkpoints;
+4. cache by content/file identity;
+5. schedule I/O per device;
+6. never turn provider/drive failure into mass deletion;
+7. keep derived search/vector indexes rebuildable;
+8. benchmark at million-entry scale before calling a subsystem scalable.
+
+## Repository strategy
 
 ```text
 upstream/main
@@ -37,32 +70,39 @@ personal-organizer
 feature/*
 ```
 
-- `upstream` points to `hyperfield/ai-file-sorter`.
-- `origin` points to `AbubakarYasir/ai-file-sorter`.
-- `main` should remain close to upstream.
-- `personal-organizer` is my stable integration branch.
-- feature work is isolated in `feature/*` branches and reviewed before integration.
+- `upstream` = `hyperfield/ai-file-sorter`;
+- `origin` = `AbubakarYasir/ai-file-sorter`;
+- `main` remains upstream-friendly;
+- `personal-organizer` is my stable custom integration branch;
+- coherent work happens on `feature/*` and merges through review.
 
-Current development branch: `feature/indexer`.
+Current implementation branch: `feature/indexer`.
 
-Current tracking issue: [#2](../../issues/2).
+Tracking:
 
-Current draft PR: [#1](../../pull/1).
+- [#2](../../issues/2) — Phase 1 filesystem state/index foundation;
+- [#3](../../issues/3) — CLI-first/offline-first/multi-terabyte architecture epic;
+- [#4](../../issues/4) — EverythingProvider;
+- [#5](../../issues/5) — dependency/delegation strategy;
+- [PR #1](../../pull/1) — current Phase 1 implementation.
 
 ## Non-negotiable engineering rules
 
-1. Indexing and analysis are read-only with respect to source files.
-2. The application must not silently reorganize an entire machine.
-3. A plan is generated before mutations are applied.
-4. Low confidence means review, not aggressive guessing.
-5. Project structure is preserved unless a specific workflow explicitly understands how to transform it safely.
-6. Personal behavior and taxonomy belong in policy/configuration where possible instead of being hard-coded throughout C++.
-7. The GUI and CLI use shared core services.
-8. The CLI may expose more controls than the GUI, but not bypass operating-system security.
-9. Extracted document text and filenames are untrusted input; they must never become hidden instructions to the application or an LLM.
-10. Applied changes must be logged with enough information to explain and, where possible, undo them.
-11. Planned commands/features must never be documented as implemented.
-12. Every significant code change includes documentation and tests appropriate to its risk.
+1. CLI is the canonical product surface.
+2. Offline operation is first-class; cloud access is optional and policy controlled.
+3. Discovery/analysis/planning do not mutate source files.
+4. Natural-language requests compile into explicit structured requirements before execution.
+5. High-impact ambiguity becomes a question, not a model guess.
+6. A plan exists before filesystem mutation.
+7. Low confidence means question/review/unchanged state.
+8. Project structure is protected unless a dedicated workflow understands it safely.
+9. Islamic/religious organization uses Arabic naming where appropriate; non-religious organization uses consistent English naming.
+10. Extracted/model content is untrusted data and cannot override policy.
+11. Long jobs are durable and restart-safe.
+12. External tools are narrow workers/providers, not authorities over intent or mutation.
+13. Model/provider/tool provenance is retained for inferred/derived data.
+14. Planned behavior is never documented as implemented.
+15. Every significant feature includes tests and documentation appropriate to its risk.
 
 ---
 
@@ -70,444 +110,527 @@ Current draft PR: [#1](../../pull/1).
 
 **Status: substantially complete.**
 
-Purpose: make long-term customization possible without losing the ability to follow upstream.
+Completed:
 
-Completed foundation:
+- personal fork/local clone/remotes;
+- upstream-friendly `main`;
+- `personal-organizer` integration branch;
+- feature-branch + draft PR workflow;
+- fork-specific CI;
+- owner documentation and `AGENTS.md`;
+- GitHub Issues as backlog.
 
-- personal GitHub fork created;
-- local clone created;
-- `origin` points to my fork;
-- `upstream` points to Hyperfield;
-- `main` reserved as upstream-friendly;
-- `personal-organizer` created as the integration branch;
-- feature-branch workflow established;
-- fork-specific roadmap and documentation established;
-- fork-specific CI introduced.
-
-Ongoing rule: upstream-heavy files should be changed only when necessary; new fork features should prefer modular services.
+Ongoing rule: prefer modular fork services and small upstream integration hooks over invasive rewrites.
 
 ---
 
-## Phase 1 — Persistent read-only filesystem index
+## Phase 1A — Trustworthy filesystem observation and CLI index
 
 **Status: in progress.**
 
-Tracking: [Issue #2](../../issues/2), [Draft PR #1](../../pull/1).
+Tracking: [#2](../../issues/2), [PR #1](../../pull/1).
 
-Goal: build a reliable local inventory without moving, renaming, deleting, or editing source files.
+Goal: establish trustworthy persistent filesystem state without mutating source files.
 
-### Index data
+Implemented/being validated:
 
-The persistent index should be able to represent:
+- dedicated SQLite `personal_file_index.db`;
+- streaming native traversal;
+- scan-run history;
+- metadata + optional SHA-256;
+- protected-project awareness;
+- useful source indexing inside protected projects;
+- generated project internals excluded;
+- explicit `observation_state` vs `policy_state`;
+- missing/inaccessible-root preservation;
+- overlapping-root rejection;
+- Windows Unicode command-line/path handling;
+- path-aware Windows system-root protections;
+- reparse traversal fail-closed;
+- schema versioning/migration backup;
+- read-only query/statistics facade;
+- controlled `index` CLI + JSON result contract;
+- Linux + Windows regression tests.
 
-- normalized full path;
-- parent path;
-- filename and extension;
-- file/directory/project type;
-- file size;
-- created/modified timestamps where available;
-- scan root;
-- last-seen scan;
-- presence/stale state;
-- optional SHA-256;
-- extraction state;
-- detected MIME/file type;
-- text availability;
-- document summary;
-- content language;
-- image description;
-- project membership/type;
-- per-entry errors/status;
-- later confidence/analysis fields.
+### Important wording correction
 
-### Requirements
+Current Phase 1A supports **persistent incremental rescanning**. It does **not** yet provide true checkpoint resume in the middle of a long scan. True pause/resume belongs to the durable job engine below and must not be claimed until implemented.
 
-- streaming traversal rather than building a whole-drive vector in memory;
-- persistent SQLite storage;
-- resumable/incremental design;
-- multiple configurable scan roots;
-- safe reparse-point/symlink handling;
-- permission errors recorded without aborting an otherwise useful scan;
-- path-aware Windows/system exclusions;
-- protected project recognition;
-- hashing optional by default;
-- statistics/query helpers;
-- machine-readable CLI command;
-- focused integration tests;
-- no source mutation.
+### Remaining exit gates
 
-### Important design correction
+- native MSVC/vcpkg production Windows build in CI;
+- invoke the actual packaged `aifilesorter.exe index ...` path;
+- use a non-Latin/Arabic/Urdu-named root in that smoke test;
+- verify resulting SQLite state;
+- hash controlled source fixtures before/after to prove no mutation;
+- run a small copied real Windows fixture owned by me;
+- synchronize issue/PR/docs with final observed behavior.
 
-Protected project detection and read-only indexing are separate concerns. A project must be protected from unsafe reorganization, but I may still want its internal files indexed for search and understanding. Phase 1 should make that policy explicit rather than assuming “protected” always means “do not read inside.”
-
-### Exit criteria
-
-I can scan a small controlled folder, inspect the resulting database/statistics, repeat the scan incrementally, and prove that no source file was changed.
-
-A whole `C:\` scan is not an exit test until path-aware exclusions and permission behavior have been validated.
+Do not run an unattended whole `C:\` scan before these gates.
 
 ---
 
-## Phase 2 — Content extraction pipeline
+## Phase 1B — Filesystem providers and Everything acceleration
 
-Goal: enrich the inventory using existing upstream extraction capabilities before adding expensive AI work.
+**Status: planned; design researched.**
 
-Planned layers:
+Tracking: [#4](../../issues/4).
+
+Goal: stop treating recursive traversal as the only discovery mechanism.
+
+Architecture:
 
 ```text
-metadata
-→ embedded document text
-→ document structure
-→ language detection
-→ compact summary
-→ content classification
+FilesystemProvider
+├── EverythingProvider   Windows fast path
+└── NativeProvider       portable fallback / reconciliation
 ```
 
-Reuse upstream document extractors for formats already supported instead of duplicating them.
+EverythingProvider should:
 
-Cache extraction by content identity/timestamps so unchanged files are not repeatedly reprocessed.
+- auto-detect compatible Everything;
+- use official SDK/IPC;
+- retain Unicode end-to-end;
+- stream/page millions of results;
+- expose capabilities rather than assuming Everything 1.5 features;
+- use 1.5 journal positions/change events when available;
+- support safer basic discovery on compatible stable versions;
+- persist provider cursor/health;
+- detect journal gaps/rebuilds;
+- trigger reconciliation instead of inventing deletion;
+- never become the semantic/content database.
+
+A private named Everything instance can be researched later, but must not silently change an existing user's Everything setup.
 
 ---
 
-## Phase 3 — OCR for scanned documents
+## Phase 2 — Durable job engine and true pause/resume
 
-Goal: understand PDFs/images that do not have a usable text layer.
+**Priority: before large-scale content intelligence.**
 
-Priority languages:
+Goal: make multi-hour/day jobs operationally trustworthy.
 
-- Arabic;
-- Urdu;
-- English;
-- mixed Arabic/English and Urdu/English documents.
-
-Intended pipeline:
+Persist:
 
 ```text
-PDF
-→ measure usable embedded text
-→ if text is insufficient:
-    select strategic pages
-    → render
-    → OCR
-    → normalize Unicode
-    → cache OCR
-→ identify document
-→ summarize/classify
+jobs
+phases
+tasks
+attempts
+checkpoints
+questions
+answers
+provider cursors
+worker/model versions
+resource leases
+events/errors
 ```
 
-Do not OCR every page of every PDF by default. Begin with identification-rich pages such as the cover/title page, publication data, contents, introduction, and representative interior pages. Escalate only when needed.
+Required behavior:
 
-OCR engine selection must be benchmarked on real Arabic/Urdu scans before it becomes a dependency.
+- `job status`;
+- `job pause`;
+- `job resume` from checkpoints;
+- `job cancel`;
+- `job tail`;
+- restart after crash/reboot without repeating completed expensive work;
+- retry failed tasks without restarting the whole corpus;
+- explicit `needs_user` state;
+- idempotent task semantics.
 
 ---
 
-## Phase 4 — Stable personal taxonomy
+## Phase 3 — Requirement / Intent Compiler
 
-Goal: replace one-off AI folder invention with a predictable organization system.
+Goal: make the CLI intelligent without letting a model improvise operational authority.
 
-The final taxonomy should be informed by the actual filesystem index, but likely domains include:
+Inputs:
 
 ```text
-Inbox
-Knowledge / Library
-Research
-Studies
-Projects
-Development
-Design
-Personal
-Resources
-Archive
+explicit CLI flags
+natural-language request
+ORGANIZE.md
+stored defaults/profile
+answers from this job/session
 ```
 
-For religious/Islamic material I want Arabic labels and bibliographic titles where appropriate, for example:
+Output: immutable structured `JobSpec`.
 
-```text
-القرآن وعلومه
-القراءات
-الحديث وعلومه
-الفقه
-أصول الفقه
-العقيدة
-التفسير وأصوله
-اللغة العربية
-السيرة
-التاريخ والتراجم
-المخطوطات والتحقيق
-```
-
-These are starting branches, not permission for the AI to invent an excessively deep hierarchy.
-
-Naming direction:
-
-- Islamic/religious content: Arabic naming where appropriate;
-- other content: consistent English naming;
-- books: real title/author/edition when confidently known;
-- projects: project-owned files remain project-owned;
-- development: technical names/conventions are preserved.
-
----
-
-## Phase 5 — `ORGANIZE.md` policy engine
-
-Goal: make ordinary organization preferences editable without recompiling C++.
-
-A policy file should define behavior such as:
-
-- allowed roots and destinations;
-- taxonomy rules;
-- naming/language rules;
-- protected paths;
-- project-specific rules;
-- Inbox behavior;
-- archive behavior;
-- research-vs-library distinctions;
-- design/media asset behavior;
-- confidence thresholds;
-- never-move patterns;
-- always-review patterns;
-- duplicate policy.
-
-The policy should be inherited/merged by scope where useful, similar in spirit to repository instruction files used by developer tools.
-
----
-
-## Phase 6 — Related-file and collection detection
-
-Goal: reason about groups before individual files.
+The compiler records each requirement's source and confidence.
 
 Examples:
 
+```text
+root = D:\Library             source: explicit_cli
+cloud = forbidden             source: policy
+language = Arabic             source: inferred, 0.96
+keep exports with source      source: unresolved_question
+```
+
+High-impact ambiguity becomes a persisted question. Independent work can continue while the affected subset waits.
+
+---
+
+## Phase 4 — Resource-aware scheduling
+
+Goal: run fast without abusing disks/GPU/CPU.
+
+Schedule separately:
+
+```text
+metadata I/O
+sequential content reads
+random hashing reads
+CPU extraction
+GPU OCR
+GPU/CPU LLM
+cloud/API work
+```
+
+Per-device behavior matters: HDD random-I/O concurrency should differ from NVMe.
+
+Potential controls:
+
+```text
+--jobs
+--io-jobs
+--cpu-jobs
+--gpu-jobs
+--read-rate
+--cloud-concurrency
+--pause-on-battery
+```
+
+Taskflow may help in-process DAG execution; persistent job state remains our responsibility.
+
+---
+
+## Phase 5 — Content identity and reusable analysis cache
+
+Goal: do not reread/reanalyze terabytes unnecessarily.
+
+Possible staged identity:
+
+```text
+platform file identity + size + mtime
+→ sampled fingerprint when needed
+→ BLAKE3 full hash when justified
+→ SHA-256 when interoperability/audit requires it
+```
+
+Extraction/OCR/chunk/embedding results are keyed by content identity + worker/model version + relevant settings.
+
+A renamed/moved identical file should reuse expensive analysis.
+
+---
+
+## Phase 6 — Worker/plugin protocol and deterministic extraction
+
+Goal: delegate mature technical primitives without turning the main binary into a dependency dump.
+
+Strong candidates:
+
+- upstream `DocumentTextAnalyzer` / PDFium;
+- ExifTool;
+- MediaInfo;
+- libarchive;
+- MIME/file-type tools.
+
+External workers use a versioned structured protocol with timeout, cancellation, provenance, logs, and health reporting.
+
+See [`PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`](PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md).
+
+---
+
+## Phase 7 — Arabic/Urdu/English OCR
+
+Goal: understand scanned books/documents offline.
+
+Benchmark candidates on real documents:
+
+```text
+PaddleOCR      leading multilingual candidate
+OCRmyPDF       PDF orchestration
+Tesseract      compatibility/fallback
+Surya          OCR/layout benchmark candidate
+```
+
+Pipeline:
+
+```text
+measure text layer
+→ strategic pages first
+→ OCR only where needed
+→ Unicode normalize
+→ page/layout confidence
+→ escalate to more pages if identification/search needs it
+```
+
+Do not blindly OCR every page of every PDF.
+
+---
+
+## Phase 8 — Search stack
+
+Goal: make the machine searchable like a personal knowledge filesystem.
+
+Layers:
+
+```text
+filename/path     EverythingProvider on Windows / provider search
+structured state SQLite
+full text         benchmark FTS5 vs Tantivy
+semantic vectors  USearch candidate
+```
+
+Arabic/Urdu literal, normalized, diacritic, stemming/tokenization, and mixed-language behavior must be benchmarked explicitly.
+
+Example target:
+
+```powershell
+aifs search "the paper where I collected Ibn Hajar's comments on ثعلبة"
+```
+
+The result should explain whether a hit came from path, literal text, OCR, metadata, bibliography, or semantic similarity.
+
+---
+
+## Phase 9 — Offline/online model router
+
+Goal: excellent offline intelligence with optional online escalation.
+
+Potential providers:
+
+```text
+bundled llama.cpp
+Ollama
+LM Studio
+custom OpenAI-compatible endpoint
+OpenAI
+Gemini
+other explicitly configured providers
+```
+
+Routing uses capability, privacy, local hardware, latency, cloud budget, and confidence from cheaper stages.
+
+Path/privacy policy can mark:
+
+```text
+local-only
+ask-before-cloud
+cloud-allowed
+metadata-only-cloud
+```
+
+Every model-derived record retains provider/model/version provenance.
+
+---
+
+## Phase 10 — Stable personal taxonomy + `ORGANIZE.md`
+
+Goal: predictable organization, not one-off AI folder invention.
+
+Top-level starting direction:
+
+```text
+00 Inbox
+01 Islamic Studies
+02 Markaz
+03 Development
+04 Design
+05 Learning
+06 Personal
+07 Library
+99 Archive
+```
+
+Islamic/religious content uses Arabic naming where appropriate; other organization uses consistent English naming.
+
+`ORGANIZE.md` should define structured constraints such as roots/destinations, taxonomy, naming, privacy, protected paths, project behavior, archive behavior, confidence thresholds, never-move/always-review rules, and duplicate policy.
+
+---
+
+## Phase 11 — Relationships and collections
+
+Reason about groups before individual files:
+
 - book + notes + annotations;
+- source scan + OCR derivative;
 - original + translation;
-- paper + supplementary data;
 - multi-volume books;
-- alternate editions/scans;
-- course lesson + worksheet + notes;
-- PSD/AI source + exports;
-- video project + assets + rendered output;
-- code repository + documentation;
-- source asset + generated derivatives.
+- paper + supplements;
+- source design + exports;
+- video project + assets;
+- repository + project docs;
+- course bundles.
 
-A collection should influence organization and review as one unit where appropriate.
-
----
-
-## Phase 7 — Duplicate detection
-
-Start with exact duplicates:
-
-```text
-size grouping
-→ SHA-256
-→ exact duplicate groups
-```
-
-Early versions must never auto-delete duplicates.
-
-Review should show what matches, where every copy exists, which copy is proposed to keep, and what space could be recovered.
-
-Later work may add near-duplicate detection for images, alternate PDF scans, exported documents, and renamed copies.
+Collections become planner context and review units where appropriate.
 
 ---
 
-## Phase 8 — Bibliographic intelligence
+## Phase 12 — Duplicate engine
 
-For books and academic/research documents, extract structured data where available:
+Start exact and deterministic:
 
 ```text
-title
-author/editor/muhaqqiq
-publisher
-edition
-volume
-publication year
-language
-subject
-identifiers
+size
+→ cached/sampled fingerprint
+→ full hash only for candidates
+→ exact duplicate group
 ```
 
-Preferred evidence order:
+Benchmark/reference fclones for massive duplicate workloads and per-device strategy. Never invoke its destructive modes automatically.
 
-1. trustworthy embedded metadata;
-2. document title/publication pages;
+Near-duplicate image/document logic is later and remains clearly distinct from proven exact identity.
+
+---
+
+## Phase 13 — Bibliographic/document intelligence
+
+Structured fields may include title, author/editor/muhaqqiq, publisher, edition, volume, year, language, subject, identifiers.
+
+Evidence order:
+
+1. trusted embedded metadata;
+2. publication/title pages;
 3. embedded text;
 4. OCR;
-5. existing filename/path context;
+5. existing path context;
 6. model inference only when necessary.
 
-The system must not fabricate missing bibliographic facts merely to produce a cleaner filename.
+Every inferred field keeps evidence/confidence/provenance. Missing facts are not fabricated for prettier names.
 
 ---
 
-## Phase 9 — Global planning engine
+## Phase 14 — Global planner + questions/review
 
-Goal: separate reasoning from filesystem mutation.
+Goal: turn knowledge + policy + requirements into a serializable proposal, not direct changes.
 
-The planner produces a serializable proposal containing, at minimum:
-
-```json
-{
-  "source": "...",
-  "destination": "...",
-  "proposedName": "...",
-  "confidence": 0.0,
-  "reasons": [],
-  "warnings": [],
-  "relationships": [],
-  "policyRules": []
-}
-```
-
-Plans should be exportable, inspectable, editable, and applicable later without rerunning AI analysis unless explicitly requested.
-
----
-
-## Phase 10 — Confidence and review
-
-Every proposed action gets a clear status such as:
+Plan entries include:
 
 ```text
-High confidence
-Needs review
-Insufficient information
-Protected
-Duplicate candidate
-Conflict
-Blocked by policy
+source identity/path
+proposed action/destination/name
+explicit requirements
+policy rules
+evidence
+model/tool provenance
+confidence
+relationships
+conflicts
+warnings
+unresolved questions
 ```
 
-The GUI should make uncertainty obvious rather than hiding it behind a confident-looking suggestion.
+The planner never executes operations.
 
 ---
 
-## Phase 11 — Apply, audit, and undo
+## Phase 15 — Apply, audit, undo
 
-Reuse and extend upstream review/apply/undo infrastructure.
+Before apply, validate source identity, freshness, conflicts, project/protected constraints, policy, required answers, permissions, duplicate certainty, and destination state.
 
-An applied change should record:
+Reuse upstream review/apply/undo infrastructure where its safety contracts fit.
 
-- plan ID;
-- timestamp;
-- original path/name;
-- final path/name;
-- action type;
-- reason/policy basis;
-- hash or identity data where useful;
-- result;
-- undo result;
-- conflicts/manual intervention.
-
-The audit database must live outside the folders being reorganized.
+Audit stores original/final state and enough data to explain and undo where technically possible.
 
 ---
 
-## Phase 12 — GUI for the personal organizer
+## Phase 16 — CLI product quality
 
-The product is GUI-first even though lower-level services and CLI are built first for testing and automation.
+CLI quality is not decoration; it is part of the product.
 
-Planned GUI areas:
+Required direction:
+
+```text
+aifs doctor
+aifs provider ...
+aifs index ...
+aifs job status|pause|resume|cancel|tail ...
+aifs inspect ...
+aifs extract ...
+aifs ocr ...
+aifs search ...
+aifs related ...
+aifs duplicates ...
+aifs policy ...
+aifs plan ...
+aifs review ...
+aifs apply ...
+aifs undo ...
+aifs models ...
+aifs shell
+```
+
+Support human output + JSON/JSONL, stable exit codes, no progress/ANSI noise when piped, UTF-8 paths, shell completion, `--offline`, privacy controls, `--dry-run`, `--explain`, and `--why`.
+
+CLI11 is the leading parser candidate as the command tree grows.
+
+---
+
+## Phase 17 — GUI client
+
+The GUI becomes a secondary client over the same jobs/providers/search/planner services.
+
+Useful views:
 
 ```text
 Overview
+Jobs
 Index
 Search
-Inbox
-Library / Knowledge
-Projects
+Questions
+Collections
 Duplicates
 Review
-Rules / Taxonomy
-History / Undo
+Rules/Policy
+History/Undo
 Diagnostics
 ```
 
-The GUI should display the same plans/status produced by the core services rather than implement separate organization logic.
+No unique organization logic lives only in GUI widgets.
 
 ---
 
-## Phase 13 — Power-user CLI and agent interface
+## Phase 18 — Agent/MCP
 
-The CLI is intended to become a functional superset of the GUI for advanced work:
+Agents call constrained core operations, not raw filesystem authority.
 
-- selected-root and whole-drive indexing;
-- include/exclude controls;
-- extraction/OCR jobs;
-- index queries/search;
-- duplicate reports;
-- policy validation;
-- plan generation/export/apply;
-- database diagnostics/maintenance;
-- JSON output;
-- scripting/scheduled tasks;
-- future MCP/agent access.
-
-Dangerous switches must be explicit and must not bypass OS permissions.
+They may query/search/start jobs/answer questions/build plans/request validated apply through the same policy/privacy/audit path as CLI users.
 
 ---
 
-## Phase 14 — Continuous Inbox organization
+## Phase 19 — Continuous operation
 
-Once the existing filesystem is stable, the preferred operating model becomes incremental organization of new incoming files rather than repeatedly redesigning the entire disk.
+Once initial organization is stable, new items arrive through Downloads/Desktop/scanner/phone/import/export inboxes and are incrementally understood and proposed under the same stable rules.
 
-Typical sources:
-
-```text
-Downloads
-Desktop Inbox
-Scanner Inbox
-Phone Imports
-Temporary Exports
-```
-
-Flow:
-
-```text
-arrive
-→ index
-→ understand
-→ match policy/taxonomy
-→ propose
-→ review if needed
-→ file
-```
+Everything/change-feed providers can make this nearly continuous without repeatedly rescanning entire drives.
 
 ---
 
-## Upstream update workflow
+## Dependency strategy
 
-```powershell
-git fetch upstream
+See [`PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`](PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md).
 
-git switch main
-git merge upstream/main
-git push origin main
+Guiding rule:
 
-git switch personal-organizer
-git merge main
-git push origin personal-organizer
-```
+> Build the intelligence, control, provenance, job semantics, policy, questions, planning, and safety that make this system unique; delegate mature low-level primitives to proven tools behind narrow adapters when doing so is safer and faster.
 
-Feature branches are then updated from `personal-organizer` or `main` according to the change being developed.
+## Immediate implementation order
 
-If a merge conflicts with fork-specific work, the conflict should be resolved deliberately and documented rather than force-overwritten.
+1. finish Phase 1A production Windows build/launcher smoke gate;
+2. controlled copied real-folder validation;
+3. merge PR #1 only when those gates pass;
+4. introduce `FilesystemProvider` abstraction;
+5. build durable JobEngine + true checkpoint pause/resume;
+6. implement/benchmark EverythingProvider;
+7. add million-entry scale/soak benchmark harness;
+8. define worker/plugin protocol and integrate deterministic metadata workers;
+9. implement content cache/fingerprints;
+10. benchmark extraction/OCR/full-text search components;
+11. build requirement/question engine;
+12. build model router/privacy policy;
+13. build relationships/taxonomy/policy/planner;
+14. build apply/audit and secondary GUI/agent clients.
 
-## Current implementation order
-
-1. finish Phase 1 indexer and tests;
-2. expose a safe CLI index command and query/statistics surface;
-3. connect existing document extraction to the index;
-4. benchmark and implement Arabic/Urdu OCR;
-5. implement `ORGANIZE.md` policy;
-6. derive/finalize taxonomy from real indexed files;
-7. relationship detection;
-8. duplicate detection;
-9. bibliographic extraction;
-10. global planning/review;
-11. GUI integration;
-12. continuous Inbox workflow;
-13. agent/MCP integrations.
-
-The guiding principle remains simple:
-
-> I want the software to earn more authority over my filesystem by becoming increasingly reliable at understanding it first.
+The system earns authority over my filesystem through evidence, persistence, explicit requirements, tests, questions, reviewability, and reversibility—not by hiding uncertainty behind an AI-looking interface.
