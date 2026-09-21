@@ -1,39 +1,79 @@
 # Personal AI File Organizer
 
-This repository is my personal fork of [`hyperfield/ai-file-sorter`](https://github.com/hyperfield/ai-file-sorter). I am extending the upstream application into a long-term, AI-assisted filesystem and knowledge organizer for my own Windows PC and workflows.
+This repository is my personal fork of [`hyperfield/ai-file-sorter`](https://github.com/hyperfield/ai-file-sorter). I am turning the upstream project into a serious **CLI-first, offline-first filesystem intelligence and organization system** for large Windows filesystems and mixed personal knowledge/work data.
 
-I am not trying to build a one-click “AI cleans your Downloads folder” toy. I want one system that can understand what my files actually are, preserve the relationships between them, propose a stable structure, and let me review every meaningful change before it touches the filesystem.
-
-## Why I am building this
-
-My files are mixed across very different kinds of work: research and books, Arabic and Urdu PDFs, scanned documents, design source files and exports, software repositories, course material, references, media, personal files, and temporary downloads. A filename-only sorter cannot organize this reliably.
-
-The organizer therefore needs to understand content and context, not only extensions and filenames. It should eventually know the difference between a reference book and an active research source, between a design source and its export, between a Git repository and loose code, and between a searchable PDF and an image-only scan that needs OCR.
-
-My target is a system that behaves more like a local file intelligence layer than a conventional folder sorter.
+I am not trying to build a one-click “AI cleans Downloads” toy. I want a system that can run for hours or days, survive interruption, understand millions of files across multi-terabyte drives, ask me targeted questions when my requirements are ambiguous, explain what it believes I asked for, and give me precise control before it changes anything.
 
 ## Product direction
 
-The application remains **GUI-first for normal use**, while the **CLI/headless interface is the power-user superset**.
+The **CLI is the canonical product surface**.
 
 ```text
-                         Shared core
-       index / content extraction / OCR / policy / planning
-                    /              |              \
-                   v               v               v
-                 GUI              CLI          Agent/MCP
-            everyday use      full controls     automation
+                              Shared core
+ filesystem providers / jobs / extraction / OCR / models / search / policy / planning
+                    /                 |                    \
+                   v                  v                     v
+                 CLI                 GUI                Agent/MCP
+              PRIMARY             secondary             automation
 ```
 
-I want the GUI for browsing, search, review, previews, rules, duplicates, history, and normal organization. I want the CLI to expose deeper controls for scripting, diagnostics, batch operations, machine-readable output, experimental switches, and future agent integrations.
+If an important capability cannot be invoked safely from the CLI, I do not consider it fully implemented in this fork.
 
-Both interfaces must call the same underlying services. Features should not be reimplemented separately for GUI and CLI.
+The GUI remains useful for browsing, previews, visual review, search, rules, duplicates, and history, but it must be a client of the same services rather than the place where core behavior lives.
+
+## Scale target
+
+The design target is **multi-million-file, 8TB+ storage**, not a Downloads-folder benchmark.
+
+That means:
+
+- never requiring the complete filesystem or extracted corpus to fit in RAM;
+- streaming/paged discovery;
+- durable jobs and checkpoints;
+- restart-safe, idempotent workers;
+- per-volume I/O scheduling;
+- explicit pause/resume/cancel/status controls;
+- caching so unchanged terabytes are not reread;
+- provider outages/inaccessible drives must never look like mass deletion;
+- derived search/vector indexes can be rebuilt without losing canonical job/file state.
+
+## Offline first, cloud optional
+
+Offline operation is the baseline, not a degraded fallback.
+
+Local capabilities should include filesystem discovery/indexing, metadata/document extraction, OCR, search, duplicate detection, local embeddings where enabled, and local LLM/vision inference.
+
+Online providers such as OpenAI, Gemini, Anthropic/OpenRouter-style or custom OpenAI-compatible endpoints can be optional escalations for difficult tasks. Privacy policy decides what is ever allowed to leave the machine.
+
+## Intelligent requirements, not blind prompts
+
+Free-form requests are not executed directly.
+
+```text
+user request / flags / ORGANIZE.md
+        ↓
+Requirement + Intent Compiler
+        ↓
+explicit constraints + inferred assumptions + unresolved questions
+        ↓
+targeted questions when ambiguity materially changes the result
+        ↓
+immutable JobSpec
+        ↓
+analysis / planning
+        ↓
+reviewable plan
+```
+
+The system must distinguish what I explicitly said, what policy requires, what was inferred, how confident that inference is, and what still needs my answer.
+
+An LLM never gets direct permission to improvise filesystem mutations.
 
 ## Core rule: understand first, mutate later
 
-The system is designed around this pipeline:
-
 ```text
+locate
+  ↓
 index
   ↓
 understand
@@ -49,98 +89,107 @@ apply
 audit / undo
 ```
 
-Indexing, OCR, classification, relationship detection, and planning are read-only with respect to source files. Moving, renaming, merging, archiving, or deleting files belongs to an explicit later apply stage.
+Indexing, OCR, classification, relationship detection, search indexing, and planning are read-only with respect to source files. Moving, renaming, merging, archiving, linking, or deleting belongs to an explicit later apply stage.
 
-Low confidence is not permission to guess. Uncertain items should remain unchanged and be surfaced for review.
+Low confidence means review or a question, not permission to guess.
+
+## Delegate solved infrastructure
+
+I do not want this fork to rebuild mature tools merely for the sake of owning every line of code.
+
+Current integration direction includes:
+
+- **voidtools Everything** as an optional Windows filesystem discovery/change-feed accelerator;
+- **ExifTool** for broad metadata extraction;
+- existing **MediaInfo** support for media metadata;
+- **libarchive** for archive inspection;
+- **OCRmyPDF** for PDF OCR orchestration where useful;
+- **PaddleOCR** as a leading Arabic/Urdu/English offline OCR candidate;
+- **Tantivy** as a large full-text search candidate;
+- **USearch** as a local vector-search candidate;
+- **BLAKE3** for fast fingerprints/content cache identity;
+- **CLI11** for the growing CLI contract;
+- selected terminal/REPL libraries for human CLI UX.
+
+External tools are providers/workers. The Personal Organizer still owns requirements, durable state, policy, privacy, provenance, questions, planning, safety, audit, and mutation authority.
+
+See [`docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`](docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md).
+
+## Windows indexing direction
+
+Everything is especially valuable because repeated recursive traversal is the wrong primitive for an 8TB Windows filesystem when the filesystem/change journal can tell us what changed.
+
+```text
+FilesystemProvider
+├── EverythingProvider   Windows accelerated path
+└── NativeProvider       portable fallback / verification path
+```
+
+Everything does **not** become the semantic database. It is a locator/change-feed provider. The organizer stores its own observation/policy states, file identities, analysis provenance, questions, and plans.
+
+Tracking: [#4](../../issues/4).
 
 ## Important organization rules
 
-The long-term organizer will use a stable personal taxonomy instead of inventing new folders on every run. My intended rules include:
+The long-term organizer uses a stable personal taxonomy instead of inventing folders on every run.
+
+Important rules include:
 
 - religious/Islamic material uses Arabic naming where appropriate;
 - non-religious categories and filenames use consistent English naming;
-- bibliographic titles should preserve their real language and spelling;
-- development repositories are treated as structural units and must not be casually rearranged internally;
-- project-owned assets stay with their project when ownership is more meaningful than file type;
-- exact duplicates are detected before any deletion is considered;
-- ambiguous incoming files can remain in an Inbox/review state instead of being force-classified;
-- archive is preferred over destructive cleanup during early versions;
-- every applied organization plan should be auditable and reversible where technically possible.
+- bibliographic titles preserve their real language/spelling;
+- development repositories are structure-sensitive and are not casually rearranged internally;
+- project-owned assets stay with their project when ownership matters more than file type;
+- exact duplicates are proven before deletion is considered;
+- ambiguous files can remain in Inbox/review instead of being force-classified;
+- archive is preferred over destructive cleanup in early versions;
+- every applied organization plan is auditable and reversible where technically possible.
 
 ## Relationship with upstream
 
-I am building this on top of Hyperfield's existing Qt/C++ application rather than rewriting the project from scratch. Upstream already provides useful foundations including GUI infrastructure, document/image analysis, categorization, review/apply behavior, undo/history, local and remote LLM support, headless integration, and protected-project detection.
-
-Repository roles:
+I am building on Hyperfield's Qt/C++ application rather than discarding useful upstream work. Upstream already provides document/image analysis, local `llama.cpp`, remote model support, review/apply, undo/history, protected-project detection, GUI infrastructure, headless behavior, settings, and SQLite persistence.
 
 ```text
 hyperfield/ai-file-sorter
-        │
         │ upstream
         v
 AbubakarYasir/ai-file-sorter
-        │
-        ├── main                upstream-friendly branch
-        ├── personal-organizer  stable custom integration branch
-        └── feature/*           isolated development branches
+        ├── main                upstream-friendly
+        ├── personal-organizer  stable custom integration
+        └── feature/*           isolated development
 ```
 
-I keep fork-specific work modular wherever practical so I can continue pulling improvements from `upstream/main` without turning every update into a large merge conflict.
+Fork-specific work should remain modular so upstream improvements can continue to be merged deliberately.
 
 ## Current development status
 
-**Current phase: Phase 1 — read-only persistent filesystem indexing.**
+**Current implementation work: Phase 1 — trustworthy persistent filesystem state and CLI indexing.**
 
-Issue: [#2 — Phase 1: Whole-PC read-only indexing foundation](../../issues/2)
+- Tracking: [#2](../../issues/2)
+- Architecture epic: [#3](../../issues/3)
+- Everything provider: [#4](../../issues/4)
+- Dependency/delegation audit: [#5](../../issues/5)
+- Draft implementation: [PR #1](../../pull/1)
 
-Draft implementation: [PR #1 — Phase 1: add read-only personal file index foundation](../../pull/1)
+The branch already contains a dedicated `PersonalFileIndex` backed by SQLite, explicit observation-vs-policy state, schema migration work, Unicode Windows handling, safe reparse behavior, protected-project awareness, machine-readable CLI work, and Linux/Windows regression CI.
 
-The current branch adds a dedicated `PersonalFileIndex` backed by SQLite. The index is intentionally separate from the existing categorization cache and is being built to support large, incremental scans and later content intelligence.
-
-Current implementation includes or is actively validating:
-
-- streaming filesystem traversal;
-- persistent scan-run history;
-- file and directory metadata;
-- safe skipping of symlinks/reparse points by default;
-- recognition of protected project roots;
-- optional SHA-256 hashing rather than mandatory whole-drive hashing;
-- fields reserved for later document text, OCR, summaries, language, and image descriptions;
-- dedicated integration tests and fork-specific CI.
-
-**Do not treat the current branch as ready for a whole `C:\` scan yet.** Path-aware Windows exclusions, CLI exposure, statistics/query helpers, and test/CI hardening are still Phase 1 work.
+It is still deliberately **not** approved for an unattended whole `C:\` run. A real native Windows production build/launcher smoke test and controlled copied-folder validation remain before Phase 1 is considered trustworthy.
 
 ## Documentation map
 
-I keep fork documentation separate from upstream documentation so upstream sync remains manageable.
+- [`docs/PERSONAL-ORGANIZER-ROADMAP.md`](docs/PERSONAL-ORGANIZER-ROADMAP.md) — build order and milestones.
+- [`docs/PERSONAL-ORGANIZER-ARCHITECTURE.md`](docs/PERSONAL-ORGANIZER-ARCHITECTURE.md) — technical boundaries.
+- [`docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`](docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md) — what I build vs delegate.
+- [`docs/PERSONAL-ORGANIZER-CLI.md`](docs/PERSONAL-ORGANIZER-CLI.md) — CLI contracts and status.
+- [`docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md`](docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md) — chronological engineering record.
+- [`AGENTS.md`](AGENTS.md) — rules for coding agents/tools.
 
-- [`docs/PERSONAL-ORGANIZER-ROADMAP.md`](docs/PERSONAL-ORGANIZER-ROADMAP.md) — what I am building and in what order.
-- [`docs/PERSONAL-ORGANIZER-ARCHITECTURE.md`](docs/PERSONAL-ORGANIZER-ARCHITECTURE.md) — technical boundaries and design decisions.
-- [`docs/PERSONAL-ORGANIZER-CLI.md`](docs/PERSONAL-ORGANIZER-CLI.md) — intended CLI contract, safety levels, and implemented/planned commands.
-- [`docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md`](docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md) — chronological engineering record, decisions, CI results, and blockers.
-- [`AGENTS.md`](AGENTS.md) — instructions for coding agents and automated contributors working on this fork.
-- [`README.md`](README.md) and the original `docs/*.md` files — upstream AI File Sorter documentation unless explicitly marked otherwise.
+Documentation is part of implementation. Planned behavior is labelled as planned; code, issues, PR state, tests, and docs should remain synchronized.
 
-## Documentation policy
+## First major milestone
 
-Documentation is part of the implementation. A feature is not finished merely because code exists.
+The first meaningful milestone is not “I can recursively walk a folder.” It is:
 
-For meaningful changes I expect the relevant issue/PR and fork documentation to be updated with:
+> I can run a production CLI job against a controlled Windows dataset, persist trustworthy filesystem state, stop/restart safely, inspect exactly what happened, prove no source mutation occurred, and have a clear path to accelerate future refreshes through providers such as Everything.
 
-- what changed;
-- why it changed;
-- safety implications;
-- commands or interfaces added/changed;
-- tests performed and their result;
-- known limitations;
-- follow-up work.
-
-Planned behavior must be labelled as planned. Documentation must not present an idea, mock command, or future architecture as already implemented.
-
-## First milestone
-
-The first real milestone is deliberately conservative:
-
-> I can scan selected folders, persist a trustworthy local inventory, understand enough metadata/content to support later intelligence, and inspect the result without moving a single source file.
-
-Once that foundation is trustworthy, OCR, taxonomy, relationship detection, duplicate detection, bibliographic extraction, organization planning, GUI workflows, and continuous Inbox organization can be layered on top of it safely.
+From there, the project can layer durable content extraction, OCR, full-text/semantic search, requirements/questions, relationships, policy, planning, review, and eventually safe whole-PC organization.
