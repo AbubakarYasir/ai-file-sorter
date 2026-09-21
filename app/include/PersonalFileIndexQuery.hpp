@@ -18,6 +18,9 @@ struct PersonalFileIndexStats {
     std::uint64_t present_directories{0};
     std::uint64_t present_protected_projects{0};
     std::uint64_t missing_entries{0};
+    // Backward-compatible name used by the early CLI JSON. It is exactly the
+    // count of observation_state='missing', not policy-skipped/unknown entries.
+    std::uint64_t stale_entries{0};
     std::uint64_t unknown_entries{0};
     std::uint64_t policy_skipped_entries{0};
     std::uint64_t hashed_files{0};
