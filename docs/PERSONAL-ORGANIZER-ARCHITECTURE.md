@@ -1,479 +1,827 @@
 # Personal AI File Organizer — Architecture
 
-This document describes how I want my fork to evolve technically. It is not a replacement for upstream `docs/architecture.md`; it documents the fork-specific architecture layered on top of Hyperfield AI File Sorter.
+This document defines the fork-specific architecture layered on top of Hyperfield AI File Sorter. It is intentionally separate from upstream `docs/architecture.md`.
 
-## Architectural goal
+The target is not a slightly better file sorter. It is a **CLI-first, offline-first filesystem intelligence system** designed for multi-million-file, multi-terabyte personal storage, long-running jobs, multilingual content, and safe organization planning.
 
-I want one shared core that can be used by three surfaces:
+## Product surface
+
+The CLI is the canonical interface.
 
 ```text
-                    Personal Organizer Core
-         index / extraction / OCR / policy / planning
-                    /          |          \
-                   v           v           v
-                 GUI          CLI       Agent/MCP
+                              Shared core
+ providers / durable jobs / extraction / OCR / search / models / policy / planning
+                    /                 |                    \
+                   v                  v                     v
+                 CLI                 GUI                Agent/MCP
+              PRIMARY             secondary             automation
 ```
 
-The GUI is the normal product experience. The CLI exposes a wider power-user surface. Agent/MCP support, if added, must call the same services rather than bypassing policy, review, or audit logic.
+A capability is not fully implemented until it has a safe CLI contract and can be consumed by other surfaces through the same core service.
 
-The core architectural rule is **analysis first, mutation second**.
+The GUI is a useful secondary client for visual browsing/review. Agent integrations are automation clients. Neither may bypass policy, job state, validation, locks, audit, or mutation rules.
+
+## Core safety rule
+
+**Understand first, mutate later.**
 
 ```text
-Filesystem
-   ↓
-Read-only index
-   ↓
-Content intelligence
-   ↓
-Relationships + taxonomy + policy
-   ↓
-Organization plan
-   ↓
-Review
-   ↓
-Apply
-   ↓
-Audit / undo
+locate
+  ↓
+observe/index
+  ↓
+extract/OCR
+  ↓
+search/understand
+  ↓
+relationships + policy
+  ↓
+organization plan
+  ↓
+questions/review
+  ↓
+validated apply
+  ↓
+audit / undo
 ```
 
-No lower layer should quietly move files merely because it has reached a classification decision.
+Discovery, analysis, model inference, and planning are read-only with respect to source files. A lower layer cannot move a file merely because it classified it.
 
-## Relationship with upstream architecture
+---
 
-I am keeping the upstream application as the base rather than creating a parallel application.
+## Scale invariants
 
-Upstream already contains useful components for:
+The system is designed for 8TB+ storage and millions of entries.
 
-- Qt desktop UI;
-- filesystem scanning;
-- document text extraction;
-- image analysis;
-- local `llama.cpp` inference;
-- remote OpenAI/Gemini/custom-compatible APIs;
-- categorization and naming;
-- review/apply workflows;
-- undo/history;
-- headless execution;
-- protected project detection;
-- settings and SQLite persistence.
+Therefore:
 
-Fork-specific services should reuse these pieces when their contracts fit. I do not want duplicate PDF readers, duplicate LLM clients, or separate GUI/CLI implementations of the same business logic.
+- no phase may require all filesystem paths in RAM;
+- no phase may assume all extracted text fits in RAM;
+- provider results are paged/streamed;
+- derived work is queued in bounded batches;
+- the same unchanged content is not repeatedly reread;
+- I/O parallelism is controlled per physical/logical device;
+- long operations expose progress, status, pause, resume and cancel;
+- crashes/reboots preserve completed work;
+- workers are idempotent or have explicit retry semantics;
+- inaccessible/offline roots preserve previous knowledge as `unknown`, not `deleted`;
+- search/vector indexes are derived and rebuildable;
+- the durable control database remains small enough to inspect, backup, migrate, and repair.
 
-## Branch architecture
+---
+
+## Layer 1 — Requirement and intent compiler
+
+The first intelligent layer interprets what I actually want before expensive analysis or planning begins.
+
+Inputs can include:
 
 ```text
-hyperfield/ai-file-sorter:main
-           │
-           │ upstream
-           v
-AbubakarYasir/ai-file-sorter:main
-           │
-           v
-personal-organizer
-           │
-           ├── feature/indexer
-           ├── feature/arabic-ocr
-           ├── feature/organize-policy
-           └── ...
+CLI flags
+free-form natural-language request
+ORGANIZE.md policy
+stored profile/defaults
+answers from this job/session
 ```
 
-`main` is the upstream-friendly branch. `personal-organizer` is the stable custom integration branch. Feature branches should be short enough to review and should merge into `personal-organizer` through PRs.
+The output is a structured `JobSpec`, not an unconstrained model prompt.
 
-## Layer 1 — Persistent file index
-
-### Purpose
-
-The existing categorization database answers a different question from the one I need for a whole-PC organizer. A whole-PC index needs to remember files even before they are categorized and must support later extraction/OCR/search/relationship work.
-
-For that reason Phase 1 introduces a separate `PersonalFileIndex` and a separate SQLite database (`personal_file_index.db`).
-
-### Current schema direction
-
-The index represents entries with fields such as:
+Conceptual model:
 
 ```text
-full path
-parent path
-name
-extension
-entry type
+Requirement
+├── value
+├── source
+│   ├── explicit_cli
+│   ├── explicit_user_text
+│   ├── policy
+│   ├── stored_preference
+│   └── inferred
+├── confidence
+└── evidence
+```
+
+The compiler must distinguish explicit instructions from inferred assumptions.
+
+### Questions
+
+If an unresolved ambiguity materially changes scope, cost, privacy, or filesystem outcome, it becomes a persisted question.
+
+Examples:
+
+```text
+Should these Markaz exports stay beside their source PSD files?
+Should cloud escalation be allowed for this folder?
+Should alternate editions be grouped together or kept separately?
+OCR title pages only first, or full documents?
+```
+
+Answers can be:
+
+- job-only;
+- session-scoped;
+- optionally promoted into permanent policy.
+
+In non-interactive mode, unresolved high-impact questions become `needs_user`; the program must not invent an answer.
+
+---
+
+## Layer 2 — Filesystem provider abstraction
+
+Filesystem discovery is a provider problem, not a single hard-coded recursive walker.
+
+```text
+FilesystemProvider
+├── capabilities()
+├── enumerate(root, cursor, page_size)
+├── observe(path/id)
+├── changes(since_cursor)
+├── health()
+└── reconcile(...)
+```
+
+Initial providers:
+
+```text
+EverythingProvider   Windows accelerated provider
+NativeProvider       portable fallback / verification provider
+```
+
+### EverythingProvider
+
+On Windows, voidtools Everything is a strong optional fast path.
+
+Use the official SDK/IPC rather than scraping GUI output. Everything can cheaply supply large filename/path inventories and, where supported, journal/change data.
+
+Everything remains a **locator/change-feed provider only**. It does not own semantic analysis, user intent, policy, questions, or plans.
+
+Provider state includes:
+
+```text
+provider kind/version
+volume/root identity
+cursor/journal position
+last successful reconciliation
+capabilities
+health/degraded state
+```
+
+A provider gap/rebuild/outage triggers reconciliation; it never becomes deletion evidence by itself.
+
+Tracking: Issue #4.
+
+### NativeProvider
+
+The native provider remains essential for:
+
+- portability;
+- validation against Everything;
+- unsupported filesystems;
+- controlled tests;
+- fallback when Everything is unavailable.
+
+Reparse/symlink traversal remains fail-closed until bounded/cycle-safe semantics are deliberately implemented.
+
+---
+
+## Layer 3 — Durable observation index
+
+Canonical filesystem/job state lives in a durable control database, currently SQLite.
+
+The index should represent physical observation separately from scan policy.
+
+```text
+observation_state:
+  present / missing / unknown
+
+policy_state:
+  included / hidden / excluded / system / reparse-skipped / protected / ...
+```
+
+A skipped file is not the same thing as a deleted file.
+
+Important identity fields may include:
+
+```text
+logical path
+normalized path key
+volume/root identity
+platform file identity where available
 size
 timestamps
-hash/hash state
-scan root
-last seen run
-present/stale state
+entry type
+provider provenance
+last trustworthy observation
+content/fingerprint state
 project metadata
 analysis state
-content summary placeholders
 errors
 ```
 
-The schema intentionally reserves content-analysis fields so later phases do not require a second disconnected database.
+The current `PersonalFileIndex` is the Phase 1 foundation for this layer.
 
-### Traversal model
+---
 
-Whole-drive scans can contain hundreds of thousands of entries. The indexer should therefore use streaming traversal:
+## Layer 4 — Durable job engine
 
-```text
-read one entry
-→ inspect metadata
-→ persist/upsert
-→ continue
-```
+Long operations must not exist only as an in-memory call stack.
 
-rather than:
+Persist at minimum:
 
 ```text
-collect entire drive into RAM
-→ analyze later
+jobs
+job_phases
+tasks
+attempts
+checkpoints
+questions
+answers
+provider_cursors
+worker_versions
+resource leases
+errors/events
 ```
 
-SQLite writes are batched for performance while the source filesystem remains read-only.
-
-### Incremental model
-
-Each scan has a run ID. Entries record their last-seen run and scan root. A repeat scan can mark previous rows stale and mark currently observed rows present again.
-
-Future optimization should avoid expensive re-analysis when size/timestamps/content identity indicate the file is unchanged.
-
-## Layer 2 — Source safety and traversal policy
-
-### Reparse points and symlinks
-
-They are not followed by default. This prevents cycles and accidental traversal outside the selected root.
-
-### Permissions
-
-Permission failures should become warnings/errors attached to scan results; they should not cause the scanner to pretend the filesystem is complete.
-
-### Windows exclusions
-
-The current first-pass implementation uses directory-name exclusions. Before whole-drive use this must become path-aware because a name such as `AppData` has different meaning depending on location.
-
-The policy should distinguish:
-
-- operating-system internals;
-- installed application internals;
-- caches/build products;
-- user-owned content;
-- explicitly included roots.
-
-A whole `C:\` scan is blocked as a recommended workflow until this is validated.
-
-## Layer 3 — Project awareness
-
-Upstream `ProtectedProjectDetector` recognizes structures such as Git, Node.js, Python, Rust, Go, Gradle, .NET, Unity, Unreal, Godot, Xcode, and Blender projects.
-
-There are two different concepts that must not be conflated:
-
-1. **read protection** — whether the indexer traverses and understands a project;
-2. **mutation protection** — whether the organizer is allowed to rearrange files inside it.
-
-My intended long-term behavior is generally:
+Example job pipeline:
 
 ```text
-project may be indexed/searchable
-but internal structure is protected from generic organization
+discover
+→ observe metadata
+→ fingerprint candidates
+→ extract deterministic content
+→ OCR where required
+→ metadata enrich
+→ search-index update
+→ embeddings where enabled
+→ semantic classification
+→ relationships
+→ planning
 ```
 
-The current Phase 1 implementation initially records strong project roots as protected units. That behavior is being treated as a temporary conservative default, not the final semantic model.
+Each task should be restart-safe. A process crash should cause unfinished leases/tasks to become retryable rather than restart the entire 8TB job.
 
-## Layer 4 — Content extraction
+### Pause/resume
 
-Content intelligence should build in stages and cache results.
+`pause` means stop taking new work and persist a clean checkpoint. `resume` means continue from persisted tasks/cursors, not restart traversal from zero.
+
+This distinction is important: persistent rescanning is not the same as checkpoint resume.
+
+---
+
+## Layer 5 — Resource-aware scheduler
+
+The scheduler controls work by resource class:
 
 ```text
-metadata
-→ existing embedded text
-→ text quality check
-→ OCR if required
-→ language identification
-→ compact summary
-→ subject/type signals
+filesystem metadata I/O
+sequential content I/O
+random hashing I/O
+CPU extraction
+GPU OCR
+GPU/CPU LLM
+network/cloud API
 ```
 
-Existing upstream `DocumentTextAnalyzer` should remain the primary extractor for supported text-bearing formats.
+Concurrency must be device-aware. An HDD should not be hit with the same random hashing concurrency as an NVMe SSD.
 
-Content extraction should not immediately invoke an LLM for every file. Cheap deterministic extraction happens first; models are used only where they add information.
+Potentially use Taskflow for in-process task DAG execution, but durable tasks/checkpoints remain ours.
 
-## Layer 5 — OCR
-
-OCR is mainly required for image-only PDFs/scans and images containing meaningful text.
-
-The OCR service should eventually expose an interface independent of any specific engine:
+Expose user controls such as:
 
 ```text
-OcrService
-├── can_handle(...)
-├── inspect_text_layer(...)
-├── select_pages(...)
-├── recognize(...)
-└── normalize(...)
+--jobs
+--io-jobs
+--cpu-jobs
+--gpu-jobs
+--read-rate
+--cloud-concurrency
+--pause-on-battery
 ```
 
-Requirements:
+Defaults should be adaptive and conservative.
+
+---
+
+## Layer 6 — Content identity and cache
+
+Expensive work is keyed to content identity, extractor/model version, and settings.
+
+A staged strategy avoids full hashing every file during discovery:
+
+```text
+stable file identity + size + mtime
+→ cheap/sampled fingerprint when required
+→ BLAKE3 full content hash when justified
+→ optional SHA-256 for interoperability/audit
+```
+
+If a file changes while being processed, discard/requeue results rather than attaching analysis to the wrong version.
+
+A content-addressed cache lets renamed/moved identical files reuse extraction/OCR/embedding work.
+
+---
+
+## Layer 7 — Worker/plugin boundary
+
+Large or language-specific dependencies should not all be linked into the main C++ binary.
+
+Workers can be external processes with a versioned JSON/JSONL protocol or another narrow IPC contract.
+
+```text
+WorkerManifest
+├── id
+├── version
+├── capabilities
+├── supported formats/languages
+├── resource requirements
+└── protocol version
+```
+
+The host provides:
+
+- bounded inputs;
+- timeout/cancellation;
+- stderr/log capture;
+- retries;
+- version/provenance recording;
+- health checks;
+- sandboxing/resource restrictions where practical.
+
+This lets Python OCR, Rust search tooling, ExifTool, and other mature utilities participate without turning the main executable into an unmaintainable dependency bundle.
+
+See `PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`.
+
+---
+
+## Layer 8 — Deterministic extraction and metadata
+
+Cheap/deterministic extraction comes before LLM work.
+
+Potential workers/libraries:
+
+```text
+upstream DocumentTextAnalyzer
+PDFium
+ExifTool
+MediaInfo
+libarchive
+file/MIME detection
+```
+
+Output should carry provenance:
+
+```text
+field/value
+source worker
+worker version
+source page/tag/path
+confidence if relevant
+```
+
+Do not send every file to an LLM merely to learn metadata a parser can read exactly.
+
+---
+
+## Layer 9 — OCR
+
+OCR is selective and cacheable.
+
+Priority languages:
 
 - Arabic;
 - Urdu;
 - English;
-- mixed-language pages;
-- page-level confidence;
-- cache by file/page identity;
-- avoid full-document OCR when identification can be achieved from strategic pages.
+- mixed-language pages.
 
-The engine should be selected from real benchmarks, not familiarity alone.
-
-## Layer 6 — Personal policy
-
-Hard-coded C++ should not contain every preference about my folders.
-
-A future `ORGANIZE.md` / policy loader should provide a declarative layer for:
+Candidate engines/workers:
 
 ```text
-roots
-allowed destinations
-taxonomy
-language/naming rules
+PaddleOCR      leading benchmark candidate
+OCRmyPDF       PDF OCR orchestration
+Tesseract      compatibility/lightweight fallback
+Surya          OCR/layout benchmark candidate
+```
+
+Pipeline:
+
+```text
+measure usable text layer
+→ identify whether OCR is needed
+→ select strategic pages first
+→ OCR
+→ normalize Unicode
+→ record page confidence/layout
+→ escalate to more pages only if required
+```
+
+Full-document OCR should be an explicit consequence of need, not the default cost for every scanned book.
+
+---
+
+## Layer 10 — Search architecture
+
+Search is layered rather than a single model query.
+
+### Name/path search
+
+EverythingProvider on Windows can provide extremely fast name/path lookup.
+
+### Durable metadata search
+
+SQLite handles structured filters and canonical state.
+
+### Full-text search
+
+Benchmark SQLite FTS5 vs Tantivy for extracted text/OCR at real corpus scale. Tantivy is a strong candidate for a rebuildable derived index.
+
+Arabic/Urdu behavior must be tested explicitly rather than assuming English tokenization quality transfers.
+
+### Semantic/vector search
+
+USearch is a strong future C++-native candidate.
+
+Vector search supplements exact/lexical search. It does not replace filenames, metadata, citations, or literal text search.
+
+---
+
+## Layer 11 — Model provider/router
+
+Offline inference is first-class.
+
+Provider classes may include:
+
+```text
+BundledLlamaCppProvider
+OllamaProvider
+LMStudioProvider
+CustomOpenAICompatibleProvider
+OpenAIProvider
+GeminiProvider
+other explicitly configured providers
+```
+
+Routing considers:
+
+```text
+capability
+quality requirement
+privacy policy
+path sensitivity
+local hardware
+latency
+cloud budget
+context size
+confidence from cheaper stages
+```
+
+Example:
+
+```text
+simple metadata/classification → deterministic/local small model
+difficult Arabic document      → stronger local model
+uncertain non-sensitive item   → optional cloud escalation
+local-only path                → cloud forbidden
+```
+
+Every derived AI result records provider/model/version/configuration provenance.
+
+---
+
+## Layer 12 — Projects and structural protection
+
+Read access and mutation authority are separate.
+
+A Git/Node/Flutter/design project may be deeply indexed and searchable while generic organization is forbidden from rearranging its internal files.
+
+Protection is a planner/apply constraint, not a reason to make useful source files invisible.
+
+---
+
+## Layer 13 — Personal policy
+
+`ORGANIZE.md` or an equivalent declarative policy layer defines stable behavior without recompiling C++.
+
+Possible rules:
+
+```text
+allowed roots/destinations
+Arabic/English naming rules
 protected paths
 project behavior
 archive behavior
-review thresholds
-never-move rules
+local-only/cloud-ok paths
+confidence thresholds
+never-move patterns
+always-review patterns
+duplicate policy
+bibliographic naming policy
 ```
 
-Possible components:
+Policy is parsed into structured constraints, not pasted into an opaque prompt.
+
+---
+
+## Layer 14 — Relationships and collections
+
+Files can belong to higher-level collections:
 
 ```text
-PersonalPolicyLoader
-TaxonomyGraph
-PolicyMatcher
-NamingPolicy
-ConfidencePolicy
-```
-
-Policy should be inspectable and testable; it should not just be inserted as an opaque prompt blob.
-
-## Layer 7 — Relationships and collections
-
-Organization quality improves when related files are identified before individual moves are proposed.
-
-A `RelationshipGrouper` or equivalent service should represent groups such as:
-
-```text
-book + annotations
+book + notes + annotations
+source scan + OCR derivative
 original + translation
-source design + exports
-video project + assets
-repo + project docs
-course bundle
-multi-volume set
 paper + supplements
+PSD/AI source + exports
+video project + assets + render
+repo + docs
+course bundle
+multi-volume work
 ```
 
-The planner should receive collections as first-class context.
+Planning on individual files before detecting these relationships produces bad organization decisions.
 
-## Layer 8 — Duplicate engine
+---
 
-Exact duplicate detection should remain deterministic:
+## Layer 15 — Duplicate engine
+
+Exact duplicate detection is deterministic and staged.
 
 ```text
-size bucket
-→ SHA-256
-→ duplicate group
+size
+→ cached/sampled fingerprint
+→ full content hash only for candidates
+→ exact duplicate group
 ```
 
-Hashing an entire drive during every index pass is wasteful, so duplicate hashing should be demand-driven or incremental.
+fclones is a benchmark/reference and possible read-only accelerator because it is optimized for large duplicate workloads. The organizer should still reuse its own existing hashes rather than reread terabytes unnecessarily.
 
-Potential components:
+No duplicate tool's destructive mode is invoked automatically.
+
+---
+
+## Layer 16 — Bibliographic/document intelligence
+
+Structured evidence can include:
 
 ```text
-DuplicateDetector
-DuplicateGroup
-DuplicateReviewModel
+title
+author/editor/muhaqqiq
+publisher
+edition
+volume
+year
+language
+subject
+identifiers
 ```
 
-Near-duplicate detection is a later feature and should never weaken certainty around exact duplicates.
-
-## Layer 9 — Bibliographic analysis
-
-Books/research PDFs need more than a category label.
-
-Potential structured record:
+Evidence priority:
 
 ```text
-BibliographicRecord
-├── title
-├── author
-├── editor / muhaqqiq
-├── publisher
-├── edition
-├── year
-├── volume
-├── language
-├── subject
-└── evidence/confidence per field
+trusted embedded metadata
+→ title/publication page
+→ embedded text
+→ OCR
+→ existing path/name context
+→ model inference only if necessary
 ```
 
-Each field should preserve provenance where possible. A model-generated guess is not equivalent to a title read directly from a publication page.
+Each field should retain evidence/provenance. Missing bibliographic facts are not fabricated merely to produce a cleaner filename.
 
-## Layer 10 — Planning engine
+---
 
-The planner is the boundary between understanding and mutation.
+## Layer 17 — Planning engine
 
-Suggested components:
+The planner converts knowledge + requirements + policy into a serializable proposal.
 
 ```text
-PlanningEngine
-├── inputs
-│   ├── ContentIndex
-│   ├── TaxonomyGraph
-│   ├── Policy
-│   ├── Relationships
-│   ├── Duplicates
-│   └── Bibliographic records
-└── output
-    └── OrganizationPlan
+OrganizationPlan
+├── source identity/path
+├── proposed action
+├── destination/name
+├── explicit requirements used
+├── policy rules used
+├── evidence
+├── model/provider provenance
+├── confidence
+├── relationships
+├── conflicts
+└── warnings/questions
 ```
-
-An `OrganizationPlan` should be serializable to JSON and contain enough evidence to explain every proposed operation.
 
 The planner does not execute operations.
 
-## Layer 11 — Review and apply
+---
 
-I want to reuse upstream review/apply/undo infrastructure rather than create an unrelated second mutation system.
+## Layer 18 — Validation, review, apply, audit
 
-Review should be able to display:
+Apply is deterministic and conservative.
 
-- current path;
-- detected identity/type;
-- proposed destination/name;
-- confidence;
-- reasons/evidence;
-- policy rules involved;
-- relationships affected;
-- conflicts;
-- duplicate implications.
+Before mutation, validate:
 
-Apply receives an approved plan and records an audit result.
+- source identity still matches;
+- destination conflicts;
+- protected/project constraints;
+- plan freshness;
+- required questions answered;
+- path/permission rules;
+- duplicate certainty;
+- expected disk/volume state.
 
-## Layer 12 — GUI
+Audit records original/final identity/path and enough information to explain and, where technically possible, undo the change.
 
-The GUI is the everyday interface and should be a thin presentation/orchestration layer over core services.
+Reuse upstream review/apply/undo infrastructure where its contracts remain correct.
 
-Potential areas:
+---
+
+## Layer 19 — CLI architecture
+
+The CLI is both a human tool and a stable machine API.
+
+Long-term command families may include:
+
+```text
+aifs doctor
+aifs provider ...
+aifs index ...
+aifs job status|pause|resume|cancel|tail ...
+aifs inspect ...
+aifs extract ...
+aifs ocr ...
+aifs search ...
+aifs related ...
+aifs duplicates ...
+aifs policy ...
+aifs plan ...
+aifs review ...
+aifs apply ...
+aifs undo ...
+aifs models ...
+aifs shell
+```
+
+Requirements:
+
+- human-readable default output;
+- `--json` / `--jsonl` machine modes;
+- stable exit codes;
+- deterministic schemas;
+- quiet/verbose/debug modes;
+- no ANSI/progress noise when piped;
+- shell completion;
+- UTF-8/Unicode-safe paths;
+- `--offline` and privacy controls;
+- `--dry-run`/plan boundaries for mutation;
+- `--explain` / `--why` where inference is involved.
+
+CLI11 is a strong candidate for the expanding parser surface.
+
+An optional future `aifs shell` can use a proper UTF-8 REPL library and maintain conversational context without weakening the underlying structured `JobSpec`/policy model.
+
+---
+
+## Layer 20 — GUI
+
+The GUI is a secondary presentation client over the same services.
+
+Potential views:
 
 ```text
 Overview
+Jobs
 Index
 Search
-Inbox
+Questions
 Collections
 Duplicates
 Review
-Taxonomy / Rules
+Policy
 History / Undo
 Diagnostics
 ```
 
-The GUI must not invent alternate categorization logic that the CLI cannot reproduce.
+The GUI must not contain unique organization logic that cannot be reproduced by the CLI/core.
 
-## Layer 13 — CLI/headless
+---
 
-The CLI is the advanced interface and a machine contract.
+## Layer 21 — Agent/MCP
 
-It should support human output and structured JSON output. The long-term CLI can expose advanced switches not shown prominently in the GUI, provided they remain explicit and safe.
+Agents call constrained services, not raw filesystem authority.
 
-Examples in `PERSONAL-ORGANIZER-CLI.md` that are marked **planned** are design targets, not current commands.
-
-## Layer 14 — Agent/MCP integration
-
-An agent should never receive direct “do anything to the filesystem” authority merely because it can call a tool.
-
-Agent integrations should call constrained services such as:
+Safe capabilities can include:
 
 ```text
-index roots
-query index
-extract/OCR
-build plan
-inspect plan
-request apply
+query providers/index
+start analysis job
+inspect status
+answer a persisted question
+search
+build/inspect plan
+request validated apply
 ```
 
-Mutation still goes through policy, review/apply rules, locks, and audit history.
+Agent calls use the same policy, privacy, locks, questions, plans, and audit path as human CLI calls.
 
-Machine-readable results should make it possible for an agent to reason without scraping GUI text.
+---
 
-## Data and privacy direction
+## Privacy architecture
 
-Whole-PC organization can touch sensitive material. Local processing is preferred where practical, especially for bulk indexing and content extraction.
+Whole-PC indexing can expose sensitive paths/content.
 
-Remote model usage, when enabled, should be explicit about what content leaves the machine. Future policy should allow paths/categories to be marked local-only.
-
-The index itself may contain sensitive filenames and extracted summaries, so its storage location and permissions matter even though it is not a copy of the original files.
-
-## Error and confidence model
-
-The architecture should avoid collapsing all outcomes into success/failure.
-
-Useful states include:
+Policy can mark scopes such as:
 
 ```text
-indexed
-partially indexed
-unreadable
-protected
-not analyzed
-analysis failed
-needs review
-conflict
-stale / missing
+local-only
+ask-before-cloud
+cloud-allowed
+metadata-only-cloud
 ```
 
-Confidence applies to inferred information, not deterministic metadata such as file size.
+Remote calls should carry explicit provenance and never happen merely because a local model is slow.
+
+The local index/search databases themselves are sensitive and should use user-private storage/permissions.
+
+---
 
 ## Testing architecture
 
-Tests should be layered:
+Tests must include:
 
-- unit tests for deterministic policy/parsing/grouping logic;
-- integration tests for temporary filesystem + SQLite behavior;
-- CLI contract tests for parse/output/exit codes;
-- regression fixtures for Arabic/Urdu/PDF/OCR behavior;
-- plan/apply tests using temporary directories only;
-- no test should require destructive operations on the developer's real filesystem.
+- deterministic unit tests;
+- temporary filesystem + SQLite integration tests;
+- Windows Unicode/path/file-identity tests;
+- provider parity/reconciliation tests;
+- provider outage/journal-gap tests;
+- schema migration + backup tests;
+- crash/restart/checkpoint-resume tests;
+- policy-change tests;
+- Arabic/Urdu extraction/OCR/search fixtures;
+- multi-million-entry synthetic scale benchmarks;
+- long-session soak tests;
+- per-device scheduling tests;
+- plugin timeout/crash tests;
+- CLI JSON/exit-code contract tests;
+- plan/apply tests only on disposable fixtures;
+- before/after source hashing for mutation-proof read-only phases.
 
-Fork-specific CI should run against `personal-organizer` and `feature/**` work even though upstream CI is primarily targeted at `main`.
+A green focused test is not equivalent to a production binary test. Windows CI must eventually compile/link the real native application and invoke the actual packaged launcher.
 
-## Documentation architecture
+---
 
-Fork documentation is deliberately namespaced with `PERSONAL-ORGANIZER-*` to reduce upstream conflicts.
+## Storage strategy
 
-The documentation contract is:
+Use SQLite as the durable control plane first.
 
-```text
-PERSONAL-ORGANIZER.md                 project entry point
-PERSONAL-ORGANIZER-ROADMAP.md         what I plan to build
-PERSONAL-ORGANIZER-ARCHITECTURE.md    how it should fit together
-PERSONAL-ORGANIZER-CLI.md             CLI contract/status
-PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md chronological engineering record
-AGENTS.md                              rules for coding agents/tools
-Issues                                actionable backlog / bugs
-Pull requests                         reviewable implementation units
-```
+SQLite stores canonical metadata/job/policy/question/provenance/audit state with WAL, bounded transactions, migrations, backups, and integrity checks.
 
-Documentation is updated alongside code. Future behavior is always labelled as planned.
-
-## Current architecture boundary
-
-As of Phase 1, the implemented fork-specific core is still intentionally small:
+Do not force every derived index into the same database:
 
 ```text
-PersonalFileIndex
-    ↓
-personal_file_index.db
+SQLite                canonical control state
+Tantivy/FTS5          rebuildable full-text index
+USearch               rebuildable vector index
+content cache         extracted/OCR/chunk artifacts by identity
 ```
 
-It already provides the persistence/traversal foundation, but content extraction integration, OCR, policy, relationships, planner, GUI surfaces, and the expanded CLI remain later work unless their documentation explicitly says otherwise.
+RocksDB or another storage engine is considered only if measured SQLite limits justify the operational complexity.
+
+---
+
+## Relationship with upstream
+
+Upstream remains valuable for:
+
+- Qt UI;
+- existing document extraction;
+- image analysis;
+- `llama.cpp` integration;
+- remote OpenAI/Gemini/custom endpoints;
+- protected project detection;
+- review/apply/undo;
+- settings and SQLite infrastructure.
+
+I reuse upstream services when their contracts fit, but the fork's CLI-first provider/job architecture should remain modular so upstream synchronization stays manageable.
+
+---
+
+## Documentation and backlog
+
+```text
+PERSONAL-ORGANIZER.md
+PERSONAL-ORGANIZER-ROADMAP.md
+PERSONAL-ORGANIZER-ARCHITECTURE.md
+PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md
+PERSONAL-ORGANIZER-CLI.md
+PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
+AGENTS.md
+Issues
+Pull requests
+```
+
+Current architecture tracking:
+
+- #2 — Phase 1 persistent filesystem state;
+- #3 — CLI-first/offline-first/multi-terabyte architecture epic;
+- #4 — EverythingProvider;
+- #5 — dependency/delegation strategy.
+
+Documentation changes with implementation; planned behavior must remain labelled as planned.
