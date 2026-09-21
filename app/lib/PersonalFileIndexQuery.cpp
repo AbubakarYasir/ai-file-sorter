@@ -43,6 +43,22 @@ bool table_exists(sqlite3* db, const char* name)
     return sqlite3_step(statement.get()) == SQLITE_ROW;
 }
 
+bool column_exists(sqlite3* db, const char* table, const char* column)
+{
+    const std::string sql = std::string("PRAGMA table_info(") + table + ");";
+    auto statement = prepare(db, sql.c_str());
+    if (!statement) {
+        return false;
+    }
+    while (sqlite3_step(statement.get()) == SQLITE_ROW) {
+        const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), 1));
+        if (name && std::string(name) == column) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::optional<std::uint64_t> scalar_uint64(sqlite3* db, const char* sql)
 {
     auto statement = prepare(db, sql);
@@ -74,8 +90,6 @@ PersonalFileIndexQuery::PersonalFileIndexQuery(std::string database_path)
 {
     impl_ = new Impl();
 
-    // Open explicitly read-only. Query/reporting surfaces must never create or
-    // mutate an index database merely because somebody asked for statistics.
     if (sqlite3_open_v2(
             database_path_.c_str(),
             &impl_->db,
@@ -105,7 +119,9 @@ std::optional<PersonalFileIndexStats> PersonalFileIndexQuery::stats() const
 {
     if (!is_open() ||
         !table_exists(impl_->db, "personal_index_entries") ||
-        !table_exists(impl_->db, "personal_index_scan_runs")) {
+        !table_exists(impl_->db, "personal_index_scan_runs") ||
+        !column_exists(impl_->db, "personal_index_entries", "observation_state") ||
+        !column_exists(impl_->db, "personal_index_entries", "policy_state")) {
         return std::nullopt;
     }
 
@@ -116,22 +132,28 @@ std::optional<PersonalFileIndexStats> PersonalFileIndexQuery::stats() const
         "SELECT COUNT(*) FROM personal_index_entries;");
     const auto present_entries = scalar_uint64(
         impl_->db,
-        "SELECT COUNT(*) FROM personal_index_entries WHERE is_present=1;");
+        "SELECT COUNT(*) FROM personal_index_entries WHERE observation_state='present';");
     const auto present_files = scalar_uint64(
         impl_->db,
         "SELECT COUNT(*) FROM personal_index_entries "
-        "WHERE is_present=1 AND entry_type=0;");
+        "WHERE observation_state='present' AND entry_type=0;");
     const auto present_directories = scalar_uint64(
         impl_->db,
         "SELECT COUNT(*) FROM personal_index_entries "
-        "WHERE is_present=1 AND entry_type=1;");
+        "WHERE observation_state='present' AND entry_type=1;");
     const auto protected_projects = scalar_uint64(
         impl_->db,
         "SELECT COUNT(*) FROM personal_index_entries "
-        "WHERE is_present=1 AND entry_type=2;");
-    const auto stale_entries = scalar_uint64(
+        "WHERE observation_state='present' AND entry_type=2;");
+    const auto missing_entries = scalar_uint64(
         impl_->db,
-        "SELECT COUNT(*) FROM personal_index_entries WHERE is_present=0;");
+        "SELECT COUNT(*) FROM personal_index_entries WHERE observation_state='missing';");
+    const auto unknown_entries = scalar_uint64(
+        impl_->db,
+        "SELECT COUNT(*) FROM personal_index_entries WHERE observation_state='unknown';");
+    const auto policy_skipped_entries = scalar_uint64(
+        impl_->db,
+        "SELECT COUNT(*) FROM personal_index_entries WHERE policy_state<>'included';");
     const auto hashed_files = scalar_uint64(
         impl_->db,
         "SELECT COUNT(*) FROM personal_index_entries "
@@ -139,11 +161,11 @@ std::optional<PersonalFileIndexStats> PersonalFileIndexQuery::stats() const
     const auto present_bytes = scalar_uint64(
         impl_->db,
         "SELECT COALESCE(SUM(size_bytes), 0) FROM personal_index_entries "
-        "WHERE is_present=1 AND entry_type=0;");
+        "WHERE observation_state='present' AND entry_type=0;");
 
     if (!total_entries || !present_entries || !present_files ||
-        !present_directories || !protected_projects || !stale_entries ||
-        !hashed_files || !present_bytes) {
+        !present_directories || !protected_projects || !missing_entries ||
+        !unknown_entries || !policy_skipped_entries || !hashed_files || !present_bytes) {
         return std::nullopt;
     }
 
@@ -152,7 +174,9 @@ std::optional<PersonalFileIndexStats> PersonalFileIndexQuery::stats() const
     result.present_files = *present_files;
     result.present_directories = *present_directories;
     result.present_protected_projects = *protected_projects;
-    result.stale_entries = *stale_entries;
+    result.missing_entries = *missing_entries;
+    result.unknown_entries = *unknown_entries;
+    result.policy_skipped_entries = *policy_skipped_entries;
     result.hashed_files = *hashed_files;
     result.present_bytes = *present_bytes;
 
