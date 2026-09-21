@@ -1,8 +1,8 @@
-# Personal Organizer Development Log
+# Personal Organizer — Development Log
 
-This is the fork-specific engineering log for the Personal AI File Organizer work.
+This is my fork-specific engineering log for the Personal AI File Organizer.
 
-It records important commits, architectural decisions, verification state, known limitations, and upstream-integration notes. It is not a replacement for Git history; it explains why the changes exist.
+I use this file to record the reasoning behind significant implementation decisions, test/CI state, safety blockers, and upstream-integration notes. Git history remains the canonical record of exact file changes; this log explains what those changes mean for the project.
 
 ## Repository model
 
@@ -11,7 +11,7 @@ upstream = hyperfield/ai-file-sorter
 origin   = AbubakarYasir/ai-file-sorter
 
 main
-  upstream-compatible base
+  upstream-friendly base
 
 personal-organizer
   stable custom integration branch
@@ -26,10 +26,16 @@ Current feature branch:
 feature/indexer
 ```
 
+Current tracking issue:
+
+```text
+#2 — Phase 1: Whole-PC read-only indexing foundation
+```
+
 Current review:
 
 ```text
-Draft PR #1: Phase 1: add read-only personal file index foundation
+Draft PR #1
 feature/indexer → personal-organizer
 ```
 
@@ -39,25 +45,25 @@ feature/indexer → personal-organizer
 
 ### `902312f` — `docs: add personal organizer roadmap`
 
-Added the initial long-term roadmap under:
+I added the first roadmap under:
 
 ```text
 docs/PERSONAL-ORGANIZER-ROADMAP.md
 ```
 
-The roadmap establishes the analyze-first sequence:
+The core development philosophy was established immediately:
 
 ```text
 index → understand → plan → review → apply → audit/undo
 ```
 
-and keeps automatic filesystem mutation out of the first milestone.
+I deliberately made the first milestone read-only instead of starting with automatic sorting.
 
 ### Branch strategy
 
-Created `personal-organizer` as the stable custom integration branch while leaving `main` suitable for upstream synchronization.
+I created `personal-organizer` as the stable custom integration branch and kept `main` suitable for upstream synchronization.
 
-Feature work is expected to happen on `feature/*` branches and merge into `personal-organizer` only after review.
+Feature work goes into `feature/*` branches and is reviewed before integration.
 
 ---
 
@@ -71,17 +77,17 @@ Added:
 app/include/PersonalFileIndex.hpp
 ```
 
-The interface defines:
+The first interface introduced:
 
 - read-only scan options;
-- scan summary/result counts;
+- scan summary counts;
 - multiple scan roots;
-- hidden-file control;
-- reparse/symlink control;
-- project protection;
+- hidden-entry control;
+- reparse/symlink behavior;
+- protected-project behavior;
 - optional SHA-256 hashing;
 - SQLite batching;
-- configurable directory exclusions.
+- configurable exclusions.
 
 ### `8c00e2bf` — `feat(indexer): implement streaming read-only file index`
 
@@ -91,54 +97,45 @@ Added:
 app/lib/PersonalFileIndex.cpp
 ```
 
-Key choices:
+Important implementation choices:
 
-- separate database: `personal_file_index.db`;
+- dedicated database: `personal_file_index.db`;
+- separate from the existing categorization cache;
 - SQLite WAL mode;
-- streaming traversal rather than collecting the entire filesystem in memory;
-- persistent scan-run table;
+- streaming traversal rather than accumulating the entire filesystem in memory;
+- persistent scan-run history;
 - persistent entry inventory;
-- metadata fields for paths, extensions, size, timestamps, hash state, project detection, and presence;
-- reserved content fields for later text/OCR/image enrichment;
+- metadata for paths, extension, size, timestamps, hash state, project detection, and presence;
+- reserved columns for later text/OCR/image enrichment;
 - reuse of upstream `ProtectedProjectDetector`;
-- optional SHA-256 hashing, off by default;
-- no source-file move/rename/delete/write operations.
+- optional hashing, disabled by default;
+- no move/rename/delete/write operations on scanned source files.
 
 ### `d2f1d0ac` — `fix(indexer): include size type explicitly`
 
-Added `<cstddef>` to make the public interface's `std::size_t` dependency explicit rather than relying on transitive includes.
+Added `<cstddef>` so the public header explicitly owns its use of `std::size_t` instead of relying on a transitive include.
 
 ### Draft PR #1
 
-Opened a draft pull request from:
+I opened PR #1 from `feature/indexer` into `personal-organizer` and kept it as a draft.
 
-```text
-feature/indexer
-```
-
-to:
-
-```text
-personal-organizer
-```
-
-The PR remains draft until Phase 1 correctness, tests, and a controlled application entry point are complete.
+The PR is not merge-ready merely because the indexer compiles conceptually; Phase 1 also requires safety fixes, a controlled entry point, tests, and accurate documentation.
 
 ---
 
 ## 2026-09-21 — Test and CI foundation
 
-### `721daf49` — `chore: track personal organizer documentation`
+### `721daf49` — documentation tracking rule
 
-Changed the upstream-style `/docs/**` ignore rule narrowly so files matching:
+I changed the upstream-style `/docs/**` ignore behavior narrowly so my fork documentation is tracked through:
 
 ```text
 docs/PERSONAL-ORGANIZER-*.md
 ```
 
-are tracked without making all ignored upstream/R&D documentation part of the fork.
+I intentionally did not unignore the entire docs/R&D surface because that would create unnecessary upstream noise.
 
-### `1f597a7e` — `test: add personal file index integration coverage`
+### `1f597a7e` — personal-index integration test
 
 Added:
 
@@ -146,25 +143,25 @@ Added:
 tests/run_personal_index_tests.sh
 ```
 
-The integration test creates an isolated temporary filesystem and verifies:
+The integration test uses an isolated temporary filesystem and is intended to verify:
 
 - regular files are indexed;
-- a Node.js project is detected as a protected project;
+- a Node.js project is recognized;
 - explicit exclusions are respected;
-- SHA-256 can be persisted;
+- SHA-256 persistence works when requested;
 - source files remain intact;
-- a second scan records stale/deleted state;
+- repeated scans update presence/stale state;
 - scan-run history is persisted.
 
-### `78d94aad` — `test: include personal index integration suite`
+### `78d94aad` — integrate the new test into the suite
 
-Added the personal-index integration script to `tests/run_all_tests.sh`.
+Added the personal-index integration test to `tests/run_all_tests.sh`.
 
-### `7795f19a` — `test: run integration scripts through bash`
+### `7795f19a` — invoke shell tests through Bash
 
-Changed the test runner to invoke shell integration tests through `bash` instead of relying on Unix executable bits. This is necessary because GitHub's contents API creates new text files as normal non-executable files.
+The test runner now invokes scripts through `bash` instead of assuming executable bits. This makes tests created through GitHub's contents API work predictably.
 
-### `3247dfd` — `ci: add personal organizer integration checks`
+### `3247dfd` — fork-specific GitHub Actions workflow
 
 Added:
 
@@ -172,7 +169,7 @@ Added:
 .github/workflows/personal-organizer-ci.yml
 ```
 
-The workflow is scoped to:
+The workflow targets:
 
 ```text
 personal-organizer
@@ -180,146 +177,214 @@ feature/**
 PRs targeting personal-organizer
 ```
 
-It installs only the dependencies needed for the current personal-index integration check and runs the new test.
+This exists because upstream's main build workflow is primarily oriented around `main`, while I need feedback on my custom integration branch and feature branches.
 
-#### CI status
+### CI result: failing, not hidden
 
-No workflow run was observed immediately after adding the workflow. This is an infrastructure state, not yet a passing/failing test result. The fork may require GitHub Actions to be enabled/approved before custom workflows execute.
+GitHub Actions is now executing the fork workflow.
 
-Do not record the Phase 1 integration suite as passing until an actual run or local build/test confirms it.
+Observed run:
+
+```text
+Workflow: Personal Organizer CI
+Run:      #10
+Branch:   feature/indexer
+Result:   FAILURE
+```
+
+Successful steps:
+
+```text
+checkout
+install test dependencies
+```
+
+Failed step:
+
+```text
+Run personal file index integration test
+```
+
+The documentation verification step was skipped because the preceding test failed.
+
+This is a real engineering failure, not an infrastructure/Actions-enable problem. The next step is to inspect the integration-test logs, fix the underlying test/code issue, and rerun CI. I will not mark Phase 1 tests as passing until GitHub or an equivalent local run actually passes.
 
 ---
 
-## 2026-09-21 — Documentation architecture
+## 2026-09-21 — Documentation system
 
-### `d857de3c` — `docs: add personal organizer project index`
+I decided not to heavily rewrite upstream `README.md`, because doing so would make every upstream sync unnecessarily conflict-prone.
 
-Added root landing page:
+Instead, fork-specific documentation is namespaced and linked from a dedicated root entry point.
+
+### Personal project entry point
 
 ```text
 PERSONAL-ORGANIZER.md
 ```
 
-It provides the fork overview without heavily rewriting upstream `README.md`, reducing future merge conflicts.
+This explains the project in my voice: why I am building it, what problem it solves for my mixed filesystem, the GUI/CLI relationship, safety model, branch strategy, current status, and documentation map.
 
-### `f5c42993` — `docs: define personal organizer architecture`
-
-Added:
+### Architecture
 
 ```text
 docs/PERSONAL-ORGANIZER-ARCHITECTURE.md
 ```
 
-Important architectural rule:
+This documents the shared-core model:
 
-> GUI, CLI, and future Agent/MCP interfaces call the same underlying organizer services.
+```text
+core services
+├── GUI
+├── CLI
+└── future Agent/MCP
+```
 
-The GUI is the primary everyday interface; the CLI is the power-user superset.
+The GUI is my everyday interface. The CLI is the power-user superset. Neither gets a separate implementation of organizer logic.
 
-### `95487330` — `docs: define personal organizer CLI contract`
-
-Added:
+### CLI contract
 
 ```text
 docs/PERSONAL-ORGANIZER-CLI.md
 ```
 
-The document distinguishes implemented engine capability from planned public commands. Planned CLI groups include indexing, search, inspect, plan/apply, OCR, duplicate analysis, taxonomy/policy tools, export, database maintenance, and diagnostics.
+The CLI documentation now explicitly labels commands as:
+
+```text
+implemented upstream
+implemented in fork
+in progress
+planned
+```
+
+This prevents design examples such as `aifilesorter index ...` from being mistaken for commands that already exist.
+
+### Roadmap rewrite
+
+The roadmap now uses my project perspective instead of referring to me as “the user.” It also separates the phases more clearly and records the intended architecture for indexing, extraction, OCR, policy, relationships, duplicates, bibliography, planning, GUI, CLI, and agent integration.
+
+### Documentation ownership rule
+
+From this point forward I treat documentation as part of implementation.
+
+A meaningful feature change should update the relevant combination of:
+
+```text
+Issue
+PR description
+PERSONAL-ORGANIZER.md
+roadmap
+architecture
+CLI contract
+development log
+AGENTS.md
+```
+
+Planned behavior must remain explicitly labelled as planned.
+
+---
+
+## GitHub Issues enabled
+
+Issues were initially disabled on the fork. After enabling them, I created:
+
+```text
+#2 — Phase 1: Whole-PC read-only indexing foundation
+```
+
+Issues are now the actionable backlog. The roadmap remains the long-term direction; issues represent work that can actually be implemented/reviewed.
+
+Future commits and PRs should reference their relevant issue where practical.
 
 ---
 
 # Current safety review
 
-The current indexer is an engineering draft. It must **not** yet be used for an unattended whole-`C:\` scan.
+The current indexer is still an engineering draft. I should **not** run it unattended against all of `C:\` yet.
 
-## Blocker 1 — stale state on inaccessible roots
+## Blocker 1 — stale-state semantics on inaccessible roots
 
 Current implementation marks previous rows for a scan root as not present before completing the new traversal.
 
 Risk:
 
-- if a root is disconnected, temporarily inaccessible, or fails early, previous entries could incorrectly appear absent.
+- if a root is disconnected, unreadable, or fails very early, existing indexed entries may be incorrectly marked absent.
 
-Required correction:
+Required direction:
 
-- record seen rows using `last_seen_run_id`;
-- finalize `is_present=0` only after the relevant root scan is trustworthy;
-- preserve previous presence state when the root cannot be scanned reliably.
+- identify entries through `last_seen_run_id`;
+- only finalize stale/presence state when the root scan is trustworthy;
+- preserve previous presence when the root itself could not be scanned reliably;
+- distinguish complete and partial root scans.
 
-## Blocker 2 — protected project semantics
+## Blocker 2 — protected-project semantics
 
-Current draft treats a strong project root as one protected entry and skips its contents.
+The first conservative implementation treats a recognized strong project root as one protected entry and does not traverse its contents.
 
-This is safe for reorganization but too conservative for a long-term searchable PC index.
+That protects projects from generic sorting, but it is too restrictive for a long-term searchable index.
 
-Desired separation:
+The intended distinction is:
 
 ```text
-project is protected from mutation
+protected from generic mutation
 !=
-project is invisible to read-only indexing
+excluded from read-only indexing
 ```
 
-A later Phase 1 revision should be able to index useful source/docs inside a project while excluding `.git`, `node_modules`, build outputs, caches, virtual environments, and similar generated content. Descendants should retain project-root/type metadata so the planner knows not to pull files out of the repository.
+Long term I want useful project contents indexed while generated/internal directories such as `.git`, `node_modules`, build outputs, caches, and virtual environments are excluded appropriately. Descendants should retain project metadata so later planners know they belong to a protected repository/project.
 
-## Blocker 3 — system exclusion semantics
+## Blocker 3 — Windows system exclusions are name-based
 
-The initial exclusion mechanism is based primarily on directory names.
+The first pass mainly excludes directory names.
 
-For a real Windows whole-drive scan, protected system locations should become path-aware. A user folder merely named `Windows` should not be treated the same as `C:\Windows`.
+A real whole-drive scanner needs path-aware rules. A user-owned folder called `Windows` is not equivalent to the operating-system directory `C:\Windows`.
 
-## Blocker 4 — public CLI not wired yet
+Whole-drive use remains blocked until this is corrected and tested.
 
-`PersonalFileIndex` exists as a shared service, but the public application entry point is not yet wired into `main.cpp`/the argument parser.
+## Blocker 4 — public CLI entry point not wired
 
-The documentation deliberately marks `aifilesorter index ...` as planned until that wiring and CLI regression coverage are complete.
+`PersonalFileIndex` exists as a core service, but the application does not yet expose the personal indexer as a stable command.
+
+The next CLI deliverable should be a small, read-only command that accepts explicit roots and returns structured status.
+
+## Blocker 5 — current integration test failure
+
+CI run #10 failed in `Run personal file index integration test`.
+
+Required action:
+
+- inspect exact compiler/runtime assertion output;
+- fix the test or code based on evidence;
+- rerun CI;
+- record the resolution here.
 
 ---
 
-# Infrastructure notes
+# Current implementation sequence
 
-## GitHub Issues
-
-Attempting to create the Phase 1 engineering backlog through GitHub Issues returned:
-
-```text
-Issues has been disabled in this repository.
-```
-
-Until Issues are enabled, active engineering checklists belong in:
-
-- Draft PR #1;
-- this development log;
-- the roadmap.
-
-## GitHub Actions
-
-The upstream `Build` workflow only targets `main`. A fork-specific `Personal Organizer CI` workflow was therefore added for `personal-organizer` and `feature/**` development.
-
-No CI success should be claimed until an actual workflow run is visible.
-
----
-
-# Next implementation sequence
-
-1. Fix stale/presence semantics for failed or partial scans.
-2. Separate protected-project mutation safety from read-only indexing depth.
-3. Introduce path-aware exclusions for Windows system roots.
-4. Get the integration test executing in CI or run the same test locally.
-5. Wire the index service into a controlled CLI entry point with stable JSON output.
-6. Add query/statistics helpers for the GUI and CLI.
-7. Only then expose the indexer in the Qt GUI.
-8. After metadata indexing is reliable, begin content extraction and Arabic/Urdu OCR work.
+1. diagnose and fix the failing Phase 1 integration test;
+2. fix stale/presence semantics for failed/partial scans;
+3. make Windows system exclusions path-aware;
+4. separate project indexing depth from mutation protection;
+5. expose a controlled read-only `index` CLI command with JSON output;
+6. add statistics/query helpers;
+7. add parser/CLI regression tests;
+8. test on a small real folder;
+9. only then consider larger real roots;
+10. connect existing document extraction to the persistent index;
+11. benchmark and implement Arabic/Urdu OCR.
 
 ---
 
 # Merge rule for PR #1
 
-Do not merge `feature/indexer` into `personal-organizer` until:
+I will not merge `feature/indexer` into `personal-organizer` until:
 
-- the integration test has actually passed;
-- stale-state safety is fixed;
-- system exclusion semantics are safe enough for selected real roots;
+- the integration test actually passes;
+- stale-state safety is corrected;
+- real-root exclusion semantics are safe enough for controlled use;
+- protected-project behavior is explicitly defined;
 - the CLI entry point is controlled and read-only;
-- documentation matches the implemented behavior;
-- no known operation can move, rename, delete, or modify scanned source files during indexing.
+- documentation matches implementation;
+- indexing cannot move, rename, delete, or edit scanned source files;
+- known Phase 1 blockers are either resolved or explicitly split into follow-up issues with a safe current boundary.
