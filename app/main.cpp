@@ -153,7 +153,11 @@ void apply_updater_live_test_environment(const UpdaterLiveTestConfig& args)
 ParsedArguments parse_command_line(int argc, char** argv)
 {
     ParsedArguments parsed;
+#ifdef _WIN32
+    parsed.personal_index = PersonalIndexCommand::parse_process_command_line(argc, argv);
+#else
     parsed.personal_index = PersonalIndexCommand::parse(argc, argv);
+#endif
     parsed.headless = HeadlessAnalysisCommand::parse(argc, argv);
     parsed.qt_args.reserve(static_cast<size_t>(argc) + 1);
 
