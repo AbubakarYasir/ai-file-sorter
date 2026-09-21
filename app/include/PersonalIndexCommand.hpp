@@ -39,9 +39,22 @@ public:
     };
 
     /**
-     * Parse the `index` subcommand. If argv[1] is not `index`, requested=false.
+     * Parse UTF-8 command arguments for the `index` subcommand.
+     *
+     * On Windows, filesystem-root strings are explicitly converted from UTF-8
+     * to native wide filesystem paths rather than being passed through the
+     * process code page.
      */
     static ParseResult parse(int argc, char** argv);
+
+    /**
+     * Parse the current process command line without losing Unicode paths.
+     *
+     * Windows uses the native UTF-16 command line (GetCommandLineW /
+     * CommandLineToArgvW) and converts it to UTF-8 before delegating to parse().
+     * Other platforms delegate directly to parse(argc, argv).
+     */
+    static ParseResult parse_process_command_line(int argc, char** argv);
 
     static std::string usage_text();
 
