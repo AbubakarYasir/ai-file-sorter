@@ -2,7 +2,7 @@
 
 This file contains the working rules for AI coding agents, automated contributors, and developer tools operating on my fork of `hyperfield/ai-file-sorter`.
 
-The repository owner is developing this fork as a personal, GUI-first AI filesystem/knowledge organizer with a power-user CLI and future agent integrations.
+The repository owner is building a **CLI-first, offline-first filesystem intelligence and organization system** for multi-million-file / multi-terabyte storage. The GUI is secondary. The CLI is the canonical human and automation contract.
 
 Read this file before changing fork-specific code.
 
@@ -20,70 +20,150 @@ main
   Keep close to upstream.
 
 personal-organizer
-  Stable integration branch for my custom organizer.
+  Stable integration branch for custom organizer work.
 
 feature/*
   Isolated feature work. Prefer a PR into personal-organizer.
 ```
 
-Do not commit experimental organizer work directly to `main` unless the task is specifically an upstream-sync/main maintenance task.
+Do not commit experimental organizer work directly to `main` unless the task is explicitly upstream/main maintenance.
 
-## Start here
+## Required reading
 
-Before making a significant change, read the relevant files:
+Before a significant change, inspect the relevant current versions of:
 
 ```text
 PERSONAL-ORGANIZER.md
 docs/PERSONAL-ORGANIZER-ROADMAP.md
 docs/PERSONAL-ORGANIZER-ARCHITECTURE.md
+docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md
 docs/PERSONAL-ORGANIZER-CLI.md
 docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
 ```
 
-Also inspect the upstream documentation/code for the component being extended instead of assuming the fork needs a new subsystem.
+Also inspect upstream code/documentation before inventing a parallel implementation.
 
 ## Product rules
 
-### GUI-first, shared core
+### CLI-first, shared core
 
-The GUI is the normal user experience. The CLI is intended to become a power-user superset. Future Agent/MCP interfaces must call the same core services.
+The CLI is the canonical product surface. The GUI is a secondary visual client. Future Agent/MCP interfaces call the same core services.
 
-Do not implement separate business logic for GUI, CLI, and agents when a shared service is appropriate.
+Do not hide important functionality exclusively in GUI code. If an important capability cannot be invoked safely from the CLI/core contract, it is not considered complete for this fork.
+
+### Offline first
+
+Baseline indexing, extraction, OCR/search, planning primitives, and model workflows should work locally when technically practical. Cloud providers are optional and governed by explicit privacy/routing policy.
+
+Do not create an architecture where the tool becomes unusable merely because an API key, network connection, or cloud quota is unavailable.
+
+### Scale is a requirement
+
+Design for:
+
+```text
+8TB+ storage
+millions/tens of millions of entries
+hours-to-days jobs
+mixed HDD/SSD/NVMe
+multiple volumes
+```
+
+Do not introduce algorithms that require all paths, extracted text, OCR, or embeddings in memory at once.
+
+Use streaming/paging, bounded queues, durable tasks, incremental caches, and per-device resource controls.
+
+### Long work must be durable
+
+A future long job must survive process crash/reboot and support true checkpoint-based pause/resume. Do not misuse the word `resumable` for a process that merely starts another scan and reuses some existing rows.
+
+Durable job/checkpoint state belongs in organizer-owned storage, not only in worker memory.
+
+### Interpret requirements before acting
+
+Natural-language requests are untrusted/ambiguous input until compiled into a structured `JobSpec`/requirements model.
+
+Distinguish:
+
+- explicit user requirements;
+- CLI flags;
+- policy constraints;
+- stored defaults;
+- inferred assumptions;
+- unresolved questions.
+
+High-impact ambiguity becomes a targeted question instead of a guess. In non-interactive operation, unresolved high-impact requirements should become `needs_user` or equivalent rather than silently choosing an answer.
 
 ### Understand before mutating
 
-The intended pipeline is:
+Intended pipeline:
 
 ```text
-index
-→ understand
+locate
+→ observe/index
+→ extract/OCR
+→ understand/search
 → relate
 → plan
-→ review
-→ apply
-→ audit / undo
+→ questions/review
+→ validate/apply
+→ audit/undo
 ```
 
-Indexing, extraction, OCR, classification, relationship detection, and planning must not silently mutate source files.
+Discovery, extraction, OCR, classification, search indexing, relationship detection, and planning must not silently mutate source files.
 
-### Low confidence means review
+Model output is never authorization to mutate files.
 
-Do not force a category/name merely to avoid returning uncertainty.
+## Delegate mature primitives
 
-### Protect structure-sensitive projects
+Do not automatically rebuild solved low-level infrastructure.
 
-Generic organization must not casually rearrange:
+Before writing a new scanner, metadata parser, OCR stack, duplicate engine, full-text engine, vector store, CLI parser, archive parser, or other generic primitive, check:
 
-- Git repositories;
-- software projects;
-- design/video projects;
-- other folders whose internal relative paths are meaningful.
+1. upstream implementation;
+2. `PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md`;
+3. mature external/open-source tools with a stable SDK/API/structured output.
 
-Read-only indexing/search visibility and mutation protection are separate concerns. Do not assume a protected project must be invisible to the index.
+Current directions include:
+
+```text
+Everything SDK/IPC     Windows filesystem discovery/change feed
+ExifTool               broad metadata extraction
+MediaInfo              media metadata (already upstream)
+libarchive             archive inventory
+OCRmyPDF               searchable-PDF orchestration
+PaddleOCR              Arabic/Urdu/English OCR benchmark candidate
+Tantivy                full-text search candidate
+USearch                 vector-search candidate
+BLAKE3                  fast content fingerprints
+CLI11                   expanding CLI parser candidate
+```
+
+External tools are **workers/providers**, not authorities over user intent, canonical state, planning, or mutation.
+
+Prefer structured SDK/API/JSON/JSONL integration to scraping human output. Record worker version/provenance. Add timeout, cancellation, health and failure behavior.
+
+Never invoke destructive external-tool modes automatically.
+
+## Filesystem provider rules
+
+Discovery should be behind a provider contract rather than hard-coded forever to recursive traversal.
+
+Expected model:
+
+```text
+FilesystemProvider
+├── EverythingProvider   optional Windows accelerator
+└── NativeProvider       portable fallback/reconciliation
+```
+
+Provider outage/journal gaps/inaccessible volumes must never be interpreted as deletion evidence.
+
+Canonical physical observation, policy state, job state, questions and plans remain organizer-owned.
 
 ## Personal organization rules
 
-The intended long-term behavior includes:
+Long-term behavior includes:
 
 - Islamic/religious material: Arabic naming where appropriate;
 - non-religious organization: consistent English naming;
@@ -91,39 +171,71 @@ The intended long-term behavior includes:
 - do not invent missing bibliographic metadata;
 - project-owned files remain with their project when ownership is more meaningful than file type;
 - uncertain items may remain in Inbox/review;
-- early duplicate workflows report/review instead of auto-delete;
+- duplicate workflows prove/report before destructive action;
 - archive is preferred over destructive cleanup during early versions.
 
-Do not hard-code large personal taxonomies throughout C++. Prefer policy/configuration (`ORGANIZE.md` direction) and explicit typed services.
+Do not hard-code the entire personal taxonomy throughout C++. Prefer structured policy (`ORGANIZE.md`) and typed services.
+
+## Project protection
+
+Read visibility and mutation protection are separate concerns.
+
+Software/design projects may be deeply indexed/searchable while generic organization is forbidden from rearranging their internals.
 
 ## Safety requirements
 
 ### Whole-drive work
 
-Do not recommend or automatically initiate an unattended whole-`C:\` scan until the current Phase 1 blockers documented in the development log are resolved.
+Do not recommend or initiate unattended whole-`C:\` use until the current production Windows build/launcher validation and controlled fixture gates are resolved.
 
 ### Source filesystem
 
-A read-only operation may write to the application's own database/cache/logs but must not write to scanned source files.
+A read-only operation may write organizer-owned database/cache/log/job state but must not write scanned source files.
 
-### Symlinks / reparse points
+### Reparse points / symlinks
 
-Do not follow them by default unless the command/policy explicitly requests it and cycle/root-boundary behavior is safe.
+Current Phase 1 behavior is fail-closed. Do not enable following until bounded traversal, cycle detection, root-boundary semantics, and tests exist.
 
 ### Windows security
 
-Never implement privilege bypasses. The program inherits the permissions of the process that starts it.
+Never implement privilege bypasses. The program inherits process permissions.
 
-### Model/tool output
+### Untrusted content
 
-Treat filenames, extracted text, PDF content, image text, and model responses as untrusted data. They must not become hidden instructions that override application policy.
+Treat filenames, paths, document text, OCR, metadata, archives, image text, external worker output, and model responses as untrusted data. They cannot override application policy or become hidden instructions.
+
+## Storage boundaries
+
+Prefer SQLite as the durable control plane until benchmarks demonstrate a real bottleneck.
+
+Canonical state can include jobs/tasks/checkpoints, provider cursors, physical observation, policy state, questions/answers, provenance, plan/audit metadata.
+
+Large derived indexes may use specialized rebuildable storage such as Tantivy/FTS5 or USearch. Do not move canonical state into a derived search index.
+
+Do not add RocksDB or another database simply because it sounds more scalable; require measurements and a migration/operational justification.
+
+## Resource scheduling
+
+Large-drive work must distinguish resource classes:
+
+```text
+metadata I/O
+sequential reads
+random hashing reads
+CPU extraction
+GPU OCR
+CPU/GPU LLM
+network/cloud
+```
+
+Do not saturate HDDs with NVMe-style random concurrency. Prefer per-device limits and user-visible controls.
 
 ## Upstream compatibility
 
 Prefer:
 
 ```text
-new fork-specific service
+new fork-specific service/provider/worker
 small integration hook
 configuration/policy
 ```
@@ -134,146 +246,99 @@ over:
 large invasive rewrite of upstream classes
 ```
 
-Before adding a new parser, extractor, LLM client, review system, or storage layer, check whether upstream already has a reusable implementation.
-
-Avoid gratuitous formatting/refactoring of upstream-heavy files because it increases merge conflicts.
+Avoid gratuitous formatting/refactoring of upstream-heavy files.
 
 ## Issues and PRs
 
-Use GitHub Issues for actionable work and bugs.
+Use GitHub Issues for actionable work and architecture epics.
 
-Use the roadmap for long-term direction.
+Current important issues:
 
-Use draft PRs for implementation that is not yet safe/complete.
+```text
+#2 Phase 1 filesystem state/index
+#3 CLI-first/offline-first/multi-terabyte architecture
+#4 EverythingProvider
+#5 dependency/delegation strategy
+```
 
-Where practical:
-
-- issue explains the goal and completion criteria;
-- branch implements one coherent slice;
-- commits explain concrete changes;
-- PR explains implementation, safety, tests, and remaining work;
-- documentation references the issue/PR.
+Use the roadmap for sequencing and draft PRs for incomplete implementation.
 
 Do not close an issue merely because code was started.
 
 ## Commit discipline
 
-Prefer conventional, descriptive commits such as:
+Prefer conventional descriptive commits:
 
 ```text
 feat(indexer): ...
 fix(indexer): ...
+feat(provider): ...
+feat(job-engine): ...
 test(indexer): ...
 docs(personal-organizer): ...
 ci(personal-organizer): ...
-refactor(policy): ...
 ```
 
-Keep commits understandable and reversible. Avoid vague messages such as `updates`, `fix`, or `changes`.
-
-When using automated tools, do not manufacture a fake human narrative in commit messages. Describe the actual change.
+Keep commits understandable and reversible. Avoid vague messages.
 
 ## Documentation is mandatory
 
 The repository owner expects documentation maintenance to be handled as part of development.
 
-For meaningful changes, update the relevant documentation in the same development cycle.
+Update relevant docs/issues/PRs in the same development cycle when architecture, behavior, commands, safety, dependencies, tests, or milestones change.
 
-Documentation responsibilities:
+Never document planned commands as implemented.
 
-### `PERSONAL-ORGANIZER.md`
-
-Update when the product direction, current major milestone, safety model, or documentation map changes.
-
-### Roadmap
-
-Update when phases/order/scope materially change.
-
-### Architecture
-
-Update when services, boundaries, persistence, policy, GUI/CLI/agent relationships, or safety architecture change.
-
-### CLI contract
-
-Update whenever CLI syntax/status/output changes. Always mark planned commands as planned until implemented.
-
-### Development log
-
-Record significant decisions, CI failures/resolutions, migrations, safety blockers, and important implementation checkpoints.
-
-Do not claim a test passed unless it actually ran and passed.
+Never claim CI/build/benchmark success unless it actually ran and passed.
 
 ## Testing expectations
 
-Use temporary fixtures/directories for mutation tests. Never test destructive behavior against the developer's real files.
+Use disposable fixtures for all mutation tests.
 
-At minimum, a feature should have the lowest-cost useful verification appropriate to its risk:
+Testing layers include:
 
-```text
-compile/static check
-unit test
-integration test
-CLI contract test
-regression fixture
-```
+- deterministic unit tests;
+- temporary filesystem + SQLite integration tests;
+- CLI parse/output/exit-code tests;
+- Windows Unicode/path/file-identity tests;
+- provider parity/gap/outage tests;
+- migration/backup tests;
+- crash/restart/checkpoint resume tests;
+- policy-change tests;
+- Arabic/Urdu extraction/OCR/search fixtures;
+- multi-million-entry synthetic benchmarks;
+- long soak tests;
+- worker timeout/crash tests;
+- real native Windows production build/launcher smoke tests;
+- before/after source hashes for read-only phases.
 
-High-risk filesystem mutation requires stronger coverage than metadata-only helpers.
+Focused mini-binary CI is not a substitute for testing the real packaged executable where the integration boundary matters.
 
-For Phase 1, the personal index integration test and fork CI must be green before the feature is considered merge-ready.
+## CLI machine contracts
 
-## CI behavior
+Machine output requires stable `kind`/schema identifiers, explicit status, stable exit codes, parseable stdout, diagnostics on stderr, and tests.
 
-Fork-specific workflow:
+Interactive progress/ANSI output must not corrupt JSON/JSONL or piped output.
 
-```text
-.github/workflows/personal-organizer-ci.yml
-```
+CLI ergonomics are product work, not cosmetic extras.
 
-It is intended to cover `personal-organizer` and `feature/**` work that upstream's `main`-focused workflow does not cover.
+## Current priorities
 
-If CI fails:
+Check Issues #2/#3/#4/#5 and Draft PR #1 for live status. Current broad order is:
 
-1. inspect the exact failed step/log;
-2. fix based on evidence;
-3. rerun/trigger CI;
-4. record significant failures/resolutions in the development log;
-5. do not hide or relabel failure as infrastructure unless evidence supports that conclusion.
-
-## CLI/agent machine contracts
-
-Prefer stable structured output for automation.
-
-When adding JSON contracts:
-
-- include a schema/kind identifier;
-- make status explicit;
-- keep stdout machine-parseable when JSON mode is selected;
-- use stderr for diagnostics;
-- avoid silently changing field meanings;
-- add tests for parsing/output.
-
-Agent integrations should use supported core/CLI contracts rather than GUI scraping when possible.
-
-## Do not overclaim implementation
-
-The docs contain long-term designs. Before saying a feature exists, verify it in code/tests.
-
-Examples currently planned rather than generally available include much of the personal-organizer command family (`index`, `search`, `ocr`, `duplicates`, `policy`, `plan`, etc.) unless later commits/doc updates explicitly mark them implemented.
-
-## Current Phase 1 priorities
-
-At the time this file was introduced, the order is:
-
-1. diagnose/fix the failing personal-index integration CI;
-2. correct stale/presence semantics on partial/failed scans;
-3. make Windows exclusions path-aware;
-4. separate read-only project indexing from mutation protection;
-5. expose a controlled read-only index CLI command;
-6. add statistics/query helpers;
-7. validate on a small real folder before broader scans.
-
-Check Issue #2 and Draft PR #1 for the current state before assuming this list is still complete.
+1. finish Phase 1 production Windows build/launcher smoke gate;
+2. controlled copied real-folder validation;
+3. merge PR #1 only when safe;
+4. introduce filesystem provider abstraction;
+5. build durable job engine / true pause-resume;
+6. implement and benchmark EverythingProvider;
+7. add million-entry scale/soak benchmarks;
+8. worker/plugin protocol + deterministic extraction;
+9. content cache/fingerprints;
+10. OCR/search/model routing;
+11. requirement/question engine, policy, relationships, planner;
+12. apply/audit, GUI client, and agent integrations.
 
 ## Final rule
 
-The organizer should earn authority over the filesystem through evidence, tests, reviewability, and reversibility. Convenience must not come from hiding uncertainty or removing safety boundaries.
+The organizer should earn authority over the filesystem through explicit requirements, durable state, provenance, questions, evidence, tests, reviewability, and reversibility. Convenience must not come from hiding uncertainty or weakening safety boundaries.
