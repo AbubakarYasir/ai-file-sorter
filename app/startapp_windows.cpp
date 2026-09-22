@@ -1099,10 +1099,6 @@ int main(int argc, char* argv[]) {
     bool console_log_flag = false;
     QStringList forwardedArgs = build_forwarded_args(processArguments, console_log_flag);
     const bool personalIndexInvocation = is_personal_index_invocation(forwardedArgs);
-    if (personalIndexInvocation && !console_log_flag) {
-        console_log_flag = true;
-        forwardedArgs.append(QStringLiteral("--console-log"));
-    }
     const bool headlessInvocation = is_headless_invocation(forwardedArgs);
     log_observed_arguments(overrides.observedArgs);
 
@@ -1118,13 +1114,32 @@ int main(int argc, char* argv[]) {
         exeDir,
         QCoreApplication::applicationFilePath());
 
-    // Personal indexing is a metadata-only command. It does not use an LLM or
-    // visual backend, so do not make it depend on CUDA/Vulkan/GGML discovery.
+    // Personal indexing is metadata-only, so do not probe CUDA/Vulkan or select
+    // an accelerator backend. The main executable is still linked against the
+    // packaged llama/ggml runtime, however, so Windows must be able to resolve
+    // the CPU runtime DLLs before the child process reaches main().
     if (personalIndexInvocation) {
+        const auto cpuRuntime =
+            GgmlRuntimePaths::resolve_windows_cpu_runtime_dir(
+                windows_executable_path(exeDir));
+        if (!cpuRuntime) {
+            qCritical().noquote()
+                << "Packaged CPU runtime required by the index command was not found.";
+            return EXIT_FAILURE;
+        }
+
+        const QString cpuRuntimePath =
+            QString::fromStdWString(cpuRuntime->wstring());
+        configure_runtime_paths(exeDir,
+                                cpuRuntimePath,
+                                secureSearchEnabled,
+                                /*useCuda=*/false,
+                                /*useVulkan=*/false);
+
         return launch_main_process(mainExecutable,
                                    forwardedArgs,
                                    BackendSelection::Cpu,
-                                   QString(),
+                                   cpuRuntimePath,
                                    updaterLiveTest,
                                    /*waitForExit=*/true,
                                    /*showErrors=*/false);

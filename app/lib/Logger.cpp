@@ -144,13 +144,13 @@ void Logger::setup_loggers()
     auto db_log_path = log_dir + "/db.log";
     auto ui_log_path = log_dir + "/ui.log";
     
-    auto core_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto core_console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
     auto core_file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(core_log_path, 1048576 * 5, 3);
 
-    auto db_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto db_console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
     auto db_file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(db_log_path, 1048576 * 5, 3);
 
-    auto ui_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto ui_console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
     auto ui_file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(ui_log_path, 1048576 * 5, 3);
 
     auto core_logger = std::make_shared<spdlog::logger>("core_logger", spdlog::sinks_init_list{core_console_sink, core_file_sink});
@@ -171,7 +171,7 @@ void Logger::setup_loggers()
 
     spdlog::flush_every(std::chrono::seconds(2));
     spdlog::set_level(spdlog::level::debug);
-    spdlog::info("Loggers initialized.");
+    core_logger->info("Loggers initialized.");
 }
 
 
