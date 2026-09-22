@@ -1,0 +1,98 @@
+name: Personal Organizer CI
+
+on:
+  push:
+    branches:
+      - personal-organizer
+      - 'feature/**'
+  pull_request:
+    branches:
+      - personal-organizer
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-organizer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  personal-index-integration:
+    name: Personal index integration (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            libsqlite3-dev \
+            libcurl4-gnutls-dev
+
+      - name: Run personal file index integration test
+        run: bash tests/run_personal_index_tests.sh
+
+      - name: Run personal index query test
+        run: bash tests/run_personal_index_query_tests.sh
+
+      - name: Run personal index command test
+        run: bash tests/run_personal_index_command_tests.sh
+
+      - name: Verify fork documentation is tracked
+        run: |
+          test -f PERSONAL-ORGANIZER.md
+          test -f AGENTS.md
+          test -f docs/PERSONAL-ORGANIZER-ROADMAP.md
+          test -f docs/PERSONAL-ORGANIZER-ARCHITECTURE.md
+          test -f docs/PERSONAL-ORGANIZER-CLI.md
+          test -f docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
+          git check-ignore -q docs/PERSONAL-ORGANIZER-ROADMAP.md && exit 1 || true
+
+  personal-index-windows:
+    name: Personal index integration (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MSYS2 test toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Run Windows personal file index integration test
+        shell: msys2 {0}
+        run: bash tests/run_personal_index_tests.sh
+
+      - name: Run Windows personal index query test
+        shell: msys2 {0}
+        run: bash tests/run_personal_index_query_tests.sh
+
+      - name: Run Windows personal index command test
+        shell: msys2 {0}
+        run: bash tests/run_personal_index_command_tests.sh
+
+      - name: Syntax-check Windows launcher
+        shell: msys2 {0}
+        run: |
+          g++ -std=c++20 -fsyntax-only \
+            $(pkg-config --cflags Qt6Core Qt6Gui Qt6Widgets Qt6Network) \
+            -Iapp/include \
+            app/startapp_windows.cpp
