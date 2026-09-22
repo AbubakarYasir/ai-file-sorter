@@ -35,6 +35,7 @@ Before a significant change, inspect the relevant current versions of:
 ```text
 PERSONAL-ORGANIZER.md
 docs/PERSONAL-ORGANIZER-ROADMAP.md
+docs/PERSONAL-ORGANIZER-CHECKPOINTS.md
 docs/PERSONAL-ORGANIZER-ARCHITECTURE.md
 docs/PERSONAL-ORGANIZER-SYSTEM-QUALITY-BAR.md
 docs/PERSONAL-ORGANIZER-DEPENDENCY-STRATEGY.md
@@ -43,6 +44,32 @@ docs/PERSONAL-ORGANIZER-DEVELOPMENT-LOG.md
 ```
 
 Also inspect upstream code/documentation before inventing a parallel implementation.
+
+## Checkpoint discipline
+
+`docs/PERSONAL-ORGANIZER-CHECKPOINTS.md` is the canonical execution/stage-gate checklist.
+
+Before starting substantial implementation work:
+
+1. identify the active checkpoint and tracking issue/PR;
+2. confirm its entry criteria are satisfied;
+3. avoid implementing work that belongs to a later locked checkpoint unless an explicit architecture decision requires a narrow preparatory hook;
+4. keep evidence attached to the checkpoint rather than relying on chat history;
+5. do not mark a checkpoint `PASS` until its required implementation, tests, native/manual qualification, evidence pack, documentation synchronization, integration, and post-merge gates are actually complete.
+
+Permitted checkpoint states are:
+
+```text
+PASS
+ACTIVE
+BLOCKED
+PLANNED
+DEFERRED
+```
+
+Code existence, a design document, a single successful demo, or focused CI alone is not enough to claim `PASS` when the checkpoint requires production/native or fault-injection evidence.
+
+If checkpoint status disagrees with code, CI, issue/PR state, roadmap, or the development log, resolve the discrepancy explicitly and conservatively before advancing.
 
 ## Product rules
 
@@ -251,7 +278,7 @@ Software/design projects may be deeply indexed/searchable while generic organiza
 
 ### Whole-drive work
 
-Do not recommend or initiate unattended whole-`C:\` use until the current production Windows build/launcher validation and controlled fixture gates are resolved.
+Do not recommend or initiate unattended whole-`C:\` use until CP-01A is formally `PASS` in `docs/PERSONAL-ORGANIZER-CHECKPOINTS.md` and its production Windows/native evidence pack is complete.
 
 ### Source filesystem
 
@@ -346,7 +373,7 @@ Current important issues:
 #8 8TB snapshots/reconciliation/benchmarks/fault injection
 ```
 
-Use the roadmap for sequencing and draft PRs for incomplete implementation.
+Use the roadmap for sequencing, `PERSONAL-ORGANIZER-CHECKPOINTS.md` for stage-gate status, and draft PRs for incomplete implementation.
 
 Do not close an issue merely because code was started.
 
@@ -371,11 +398,11 @@ Keep commits understandable and reversible. Avoid vague messages.
 
 The repository owner expects documentation maintenance to be handled as part of development.
 
-Update relevant docs/issues/PRs in the same development cycle when architecture, behavior, commands, safety, dependencies, tests, or milestones change.
+Update relevant docs/issues/PRs in the same development cycle when architecture, behavior, commands, safety, dependencies, tests, milestones, or checkpoint status change.
 
 Never document planned commands as implemented.
 
-Never claim CI/build/benchmark success unless it actually ran and passed.
+Never claim CI/build/benchmark/checkpoint success unless it actually ran and passed.
 
 ## Testing expectations
 
@@ -418,23 +445,21 @@ Human explicit commands, guided interactive flows, and natural-language intent m
 
 ## Current priorities
 
-Check Issues #2–#8 and Draft PR #1 for live status. Current broad order is:
+Use `docs/PERSONAL-ORGANIZER-CHECKPOINTS.md`, Issues #2–#8, and the active PRs as the live execution state.
 
-1. finish Phase 1 native Windows build/packaged-launcher/no-mutation smoke gate;
-2. controlled copied real-folder validation;
-3. merge PR #1 only when safe;
-4. introduce filesystem provider abstraction and Everything acceleration;
-5. build durable job runtime / true pause-resume / resource scheduler;
-6. add observation snapshots/reconciliation and million-entry/fault testing;
-7. build typed intent/question/policy engine;
-8. worker/plugin protocol + deterministic extraction;
-9. content identity/cache/fingerprints;
-10. Arabic/Urdu OCR + full-text search + semantic search;
-11. offline/online model routing and task-specific model benchmarks;
-12. relationships/lineage/bibliography/duplicates;
-13. planner + simulation + review;
-14. validated apply/audit/undo;
-15. continuous operation, GUI client, and agent integrations.
+Current broad order is:
+
+1. finish CP-01A hosted Windows production gate/evidence synchronization and merge PR #1 only when safe;
+2. CP-01B — introduce `FilesystemProvider` abstraction and move existing traversal behind `NativeProvider` with behavior parity;
+3. CP-01C — add optional Everything enumeration acceleration;
+4. CP-01D — add provider change feeds, snapshots, and reconciliation semantics;
+5. CP-02 — build durable job runtime / true pause-resume;
+6. CP-03/CP-04 — typed intent/question/policy engine and resource-aware scheduling;
+7. CP-05/CP-06 — content identity/cache and worker/plugin deterministic extraction;
+8. CP-07/CP-08 — Arabic/Urdu OCR and full-text/search stack;
+9. CP-09 onward — model routing, taxonomy, relationships, duplicates, bibliography, planner, simulation, apply/audit, GUI, agents, continuous operation.
+
+Do not skip a checkpoint merely because a later feature is more visible or exciting.
 
 ## Final rule
 
